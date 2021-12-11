@@ -1227,6 +1227,7 @@ nav {
     .navbar-header {
         float: none;
     }
+   
     .navbar-left,.navbar-right {
         float: none !important;
     }
@@ -1394,7 +1395,7 @@ nav {
         margin-top: .49999999px;
     }
     .navbar-default .container {
-        max-width: 1620px;
+        max-width: 1680px;
         padding-left: 0px;
         padding-right: 0px;
     }
@@ -4204,10 +4205,14 @@ pre {
 
   .wrapper1 {
       margin-top:70px;
-      margin-left:20px;
+      
     display: grid;
-    grid-template-columns: 300px 300px 300px  300px;
-    grid-gap:30px;
+    grid-template-columns: 300px 350px 300px  350px;
+    grid-gap:20px;
+  }
+  .add{
+      font-size:20px;
+      font-weight:bolder;
   }
 
   .contact-person{
@@ -4238,4 +4243,23 @@ pre {
     background-color: rgb(15, 1, 1);
     color: white;
     text-align: center;
+  }
+
+  .custom-design{
+    
+     height:500px;
+  }
+
+  .customize{
+      margin-top:-40px;
+  }
+  .publications-list{
+      text-align:center;
+  }
+
+  .design{
+      margin-top:30px;
+  }
+  .sub-style{
+      margin-bottom:-40px;
   }

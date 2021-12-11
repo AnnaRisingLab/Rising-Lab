@@ -121,45 +121,7 @@
         navigation: false,
         navigationText : ['<i class="icon ion-chevron-left"></i>','<i class="icon ion-chevron-right"></i>'],
     });
-    /* -------------------
-    Parallax Sections
-    ---------------------*/
-    if(!Modernizr.touch){
-        $('#home-parallax-fullscreen').parallax("50%", 0.5); 
-        $('#home-parallax-fullwidth').parallax("50%", 0.5); 
-        $('.parallax-section-1').parallax("50%", 0.5);
-        $('.parallax-section-2').parallax("50%", 0.5);
-        $('.parallax-section-3').parallax("50%", 0.5);
-        $('.parallax-section-4').parallax("50%", 0.5);
-        $('.parallax-section-5').parallax("50%", 0.5);
-        $('.parallax-section-6').parallax("50%", 0.5);
-        $('.parallax-section-7').parallax("50%", 0.5); 
-        $('.parallax-section-8').parallax("50%", 0.5); 
-        $('.parallax-section-9').parallax("50%", 0.5); 
-        $('#home-landing').parallax("50%", 0.5);
-        
-        /* -------------------
-        Animation.css calling
-        ---------------------*/
-        new WOW().init(); 
-    }
-    /* -------------------
-    Google map
-    ---------------------*/
-    $("#map").gmap3({
-        marker:{     
-        address:"44 W 66th St, New York, NY", 
-        options:{ icon: "../img/assets/marker.png"}},
-        map:{
-        options:{
-        styles: [ {
-        stylers: [ { "saturation":-90 }, { "lightness": 0 }, { "gamma": 0.0 }]},
-        ],
-        zoom: 13,
-        scrollwheel:false,
-        draggable: true }
-        }
-    });	
+    
     /* -------------------
     Animated progress bars
     ---------------------*/
@@ -265,82 +227,8 @@
         }
       });
     });
-    /* -------------------
-    Auto-close responsive navbar
-    ---------------------*/
-    function close_toggle() {
-        if ($(window).width() <= 992) {
-          $('.navbar-collapse a').on('click', function(){
-              $('.navbar-collapse').collapse('hide')
-          }); 
-        }
-        else {
-         $('.navbar .navbar-default a').off('click')
-        }
-    }
-    close_toggle();
-    $(window).resize(close_toggle); 
-    $(".navbar-collapse").css({ maxHeight: $(window).height() - $(".navbar-header").height() + "px" });
-    /* -------------------
-    Contact form
-    ---------------------*/
-    $('#contactform').submit(function(){
-		var action = $(this).attr('action');
-		$("#message").slideUp(250,function() {
-            $('#message').hide();
-            $('#submit')
-                .after('<img src="../img/assets/contact-form-loader.gif" class="loader" />')
-                .attr('disabled','disabled');
-            $.post(action, {
-                name: $('#name').val(),
-                email: $('#email').val(),
-                subject: $('#subject').val(),
-                comments: $('#comments').val(),
-            },
-                function(data){
-                    document.getElementById('message').innerHTML = data;
-                    $('#message').slideDown(250);
-                    $('#contactform img.loader').fadeOut('slow',function(){$(this).remove()});
-                    $('#submit').removeAttr('disabled');
-                    if(data.match('success') != null) $('#contactform').slideUp(850, 'easeInOutExpo');
-                }
-            );
-		});
-		return false;
-	});
-    /* -------------------
-    Subscribe form
-    ---------------------*/
-    $( document ).on( 'ready', function() {
-        $( '#subscribe-form' ).on( 'submit', function( e ) {
-            e.preventDefault();
-            var $el = $( this ),
-                $alert = $el.find( '.form-validation' ),
-                $submit = $el.find( 'button' ),
-                action = $el.attr( 'action' );
-            $submit.button( 'loading' );
-            $alert.removeClass( 'alert-danger alert-success' );
-            $alert.html( '' );
-            $.ajax({
-                type     : 'POST',
-                url      : action,
-                data     : $el.serialize() + '&ajax=1',
-                dataType : 'JSON',
-                success  : function( response ) {
-                    if ( response.status == 'error' ) {
-                        $alert.html( response.message );
-                        $alert.addClass( 'alert-danger' ).fadeIn( 500 );
-                    } 
-                    else {
-                        $el.trigger( 'reset' );
-                        $alert.html( response.message );
-                        $alert.addClass( 'alert-success' ).fadeIn( 500 );
-                    }
-                    $submit.button( 'reset' );
-                },
-            })
-        });
-    });
+    
+   
     /* -------------------
     Bootstrap Tooltip, Alert, Tabs
     ---------------------*/
