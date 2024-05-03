@@ -1,0 +1,300 @@
+---
+title: "Figure 1 BulkRNA"
+author: "Johan"
+date: "01/04/2024"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+    code_folding: hide
+    df_print: paged
+
+
+---
+
+
+
+
+
+
+```{r setup, include=FALSE}
+
+repositoryPath = "~/git/Rising-Lab/MajorGland_paper"
+
+#source("~/git/RNAmappingPipeline/R/ExpressionAnalysisFunctions.R")
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+
+library(knitr)
+#install.packages("kableExtra")
+#library("viridis")     
+
+library(RColorBrewer)
+#library(GenomicFeatures)
+library(DESeq2)
+
+library(ropls)
+
+library(ggforce)
+library(patchwork)
+
+
+rename <- dplyr::rename
+
+
+source("../loadGeneInfo.R")
+source("../colorSchemes.R")
+source("../customFunctions.R")
+summarise = dplyr::summarise               
+select = dplyr::select
+group_by = dplyr::group_by
+
+
+```
+
+
+# Functions
+
+
+## Gene information
+```{r Gene information, message=FALSE, warning=FALSE}
+
+geneInfo =  getGeneInfoFull(repositoryPath = repositoryPath) %>%
+  select(gene_id, geneName, lascID,scGeneName,Chr,Start, End)
+GI = getGeneInfoFull(repositoryPath = repositoryPath)
+geneInfo.transcript = addTranscriptInfo(geneInfo = GI,repositoryPath = repositoryPath) %>%group_by(gene_id) %>% 
+  arrange(-tx_len ) %>% slice_head(n = 1) %>% select(gene_id,geneName,tx_name,tx_len)
+
+
+
+```
+
+
+
+## Parameters
+```{r Parameters, message=FALSE, warning=FALSE}
+
+minExpressionCutoff =20
+DataGenerated = TRUE
+
+orderSilkGroup = c("MaSp1","MaSp2","MaSp3","MaSp4","AmSp-like","Spice-LMa","Not in silk")
+
+
+proteinInfo = getMajorAmpullateGlandProteins(repositoryPath = repositoryPath)  %>%
+  mutate(silkGroup = factor(silkGroup,levels =orderSilkGroup))
+
+## Add length
+
+
+geneInfo = getGeneInfoFull(repositoryPath)
+transcriptInfo = addTranscriptInfo(repositoryPath = repositoryPath,geneInfo = geneInfo) %>%
+  group_by(gene_id) %>%
+  arrange(-tx_len) %>%
+  slice_head(n = 1) %>% ungroup()
+
+
+
+merged_df <- read.csv("../../annotation/proteomics/proteinComposition.csv") %>%
+  mutate(tx_name = Protein.ID) %>%
+  inner_join(transcriptInfo) %>%
+  select(Length,geneName) %>% inner_join(proteinInfo) ->
+  proteinInfo
+```
+
+# RNA analysis
+## QC
+```{r, message=FALSE, warning=FALSE}
+
+
+sampleInfo.QC.merged = read_csv(file = "../../data/bulkRNA/sampleInfo.QC.merged")
+
+bulk.data.merged = read_csv(file = "../../data/bulkRNA/All.samples.count.csv") %>%
+  rename(gene_id = "Geneid")
+
+geneInfo = getGeneInfoFull(repositoryPath = repositoryPath) %>% select(gene_id,geneName,product)
+
+bulk.data.merged.QC = bulk.data.merged[,c("gene_id",sampleInfo.QC.merged$sample)]
+      
+```
+
+### Gene QC filter
+
+```{r, message=FALSE, warning=FALSE}
+
+bulk.data.merged.QC %>% 
+  pivot_longer(cols = -gene_id, names_to = "sample",values_to = "count") %>%
+  group_by(sample) %>%
+  dplyr::summarise(sampleReads = sum(count)) ->
+  sample.count.info
+
+
+
+
+transcriptInfo %>% group_by(gene_id) %>%
+  summarise(length = max(tx_len)) -> geneInfo.length
+
+bulk.data.merged.QC %>% 
+  pivot_longer(cols = -gene_id, names_to = "sample",values_to = "count") %>%
+  inner_join(geneInfo.length) %>%
+  mutate(normLengthCount = count/ length)->
+  bulk.data.merged.QC.tpm
+
+
+bulk.data.merged.QC.tpm %>%  
+  group_by(sample) %>%
+  dplyr::summarise(sampleReads = sum(normLengthCount)) %>%
+  inner_join(bulk.data.merged.QC.tpm) %>%
+  mutate(tpm= (normLengthCount/sampleReads*1000000)) ->
+  bulk.data.merged.QC.tpm
+
+
+
+
+bulk.data.merged.QC.tpm %>% select(gene_id,sample,length,count,tpm) -> bulk.data.merged.QC.tpm
+
+
+
+bulk.data.merged.QC.tpm %>%
+  group_by(gene_id) %>% 
+  summarise(max_tpm = max(tpm)) %>%
+  inner_join(geneInfo) %>%
+  left_join(proteinInfo) %>%
+  mutate(Group = replace(silkGroup, is.na(silkGroup), "Other")) ->  bulk.data.merged.QC.tpm.summary
+
+
+bulk.data.merged.QC.tpm.summary %>%ggplot(aes(log10(max_tpm ))) + geom_density()
+
+
+bulk.data.merged.QC.tpm.summary %>%
+  select(gene_id,max_tpm) -> 
+  geneInfo.tpm
+
+
+geneInfo.tpm %>% filter(max_tpm > 4) ->
+geneInfo.QC
+
+
+bulk.data.merged.QC %>% pivot_longer(-gene_id, values_to = "readCount", names_to = "sample") -> bulk.data.merged.QC.long
+  
+
+
+getGeneInfoFull(repositoryPath = repositoryPath) %>% select(gene_id,geneName,lascID) -> geneNames.all
+bulk.data.merged.QC.tpm %>% 
+  inner_join(sampleInfo.QC.merged) %>%
+  filter(Tissue == c("Major") | MAG == c("Part")) %>%
+  group_by(gene_id,Tissue, MAG) %>%
+  summarise(tpm = mean(tpm)) %>% 
+  select(-MAG) %>%
+  pivot_wider(names_from = "Tissue" , values_from = "tpm") -> 
+  bulk.data.merged.QC.tpm.major.wide
+
+
+
+
+```
+
+## Figure1 Spidroin expression levels
+
+```{r, message=FALSE, warning=FALSE}
+
+sampleInfo.QC.merged %>%
+  filter(Tissue %in%  c("Head",
+                        "WholeBody",
+                        "AciniPyri",
+                        "Flagelliform",
+                        "Major",
+                        "Minor",
+                        "Aggregate"
+                        )) ->
+  sampleInfo.QC.merged.wholeTissues
+
+
+spidroinNames = read_csv( "../../annotation/Lsc.v1.1.spidroin.geneNames.csv")				
+	
+
+
+bulk.data.merged.QC.tpm %>% inner_join(sampleInfo.QC.merged.wholeTissues)->   bulk.data.merged.QC.tpm.tissues
+
+
+
+bulk.data.merged.QC.tpm.tissues %>% group_by(Tissue,gene_id) %>%
+  summarise(mean = mean(tpm)) %>%
+  inner_join(getGeneInfoFull(repositoryPath)) %>%
+  filter(Group == "Spidroin") %>%
+  filter(Tissue != "Tubuli") %>%
+   select(geneName, mean, Tissue)%>%
+  pivot_wider(values_from = "mean", names_from = "Tissue") %>%
+  arrange(geneName) %>%
+  select(geneName,Aggregate,AciniPyri,Flagelliform,Major,Minor, WholeBody,Head) %>%
+  column_to_rownames(var = "geneName")  ->
+  bulk.data.merged.QC.tpm.tissues.mean
+
+
+newOrder = c("MaSp1a","MaSp1c","MaSp1b",
+  "MaSp2b","MaSp2c","MaSp2e","MaSp2f","MaSp3a","MaSp3b",
+  "MaSp2a","MaSp4","MaSp2d","Spidroin1","Spidroin3",
+  "MiSpa","MiSpb","MiSpc","MiSpd",
+  "AgSp1","AgSp2b","AgSp2a","Spidroin2",
+  "FlSp-like","FlSpa","FlSpb","FlSpc",
+  "TuSp-like","TuSpa","TuSpb","TuSpc",
+  "PySpa","PySpb",
+  "AcSpa","AcSp1b","AcSp1c"
+  )
+
+
+
+spidroinNames = data.frame(geneName =newOrder, spidroinName = spidroinNames) %>% inner_join(geneNames.all) 
+#write_csv(spidroinNames, "../../annotation/Lsc.v1.1.spidroin.geneNames.csv")
+spidroinNames = spidroinNames
+
+bulk.data.merged.QC.tpm.tissues.mean = bulk.data.merged.QC.tpm.tissues.mean[newOrder,]
+
+rownames(bulk.data.merged.QC.tpm.tissues.mean) = c("MaSp1a","MaSp1c","MaSp1b",
+  "MaSp2b","MaSp2c","MaSp2e","MaSp2f","MaSp3a","MaSp3b",
+  "MaSp2a","MaSp4","MaSp2d","AmSp-like1","AmSp-like2",
+  "MiSpa","MiSpb","MiSpc","MiSpd",
+  "AgSp1","AgSp2b","AgSp2a","AgSp-like",
+  "FlSp-like","FlSpa","FlSpb","FlSpc",
+  "TuSpa","TuSpb","TuSpc","TuSpd",
+  "PySpa","PySpb",
+  "AcSpa","AcSp1b","AcSp1c"
+  )
+
+
+library(circlize)
+f1 = colorRamp2(seq(0, 3000, length = 3), c("blue", "#EEEEEE", "red"))
+ComplexHeatmap::Heatmap(
+  bulk.data.merged.QC.tpm.tissues.mean, cluster_columns = FALSE, cluster_rows = FALSE, col=f1)
+
+pdf("../../figures/figure1/figure1.expression.heatmap.tpm.pdf", width = 3, height=6)
+ComplexHeatmap::Heatmap(
+  bulk.data.merged.QC.tpm.tissues.mean, cluster_columns = FALSE, cluster_rows = FALSE, col=f1)
+dev.off()
+
+
+
+```
+
+## Suplementary figure 14
+```{r, message=FALSE, warning=FALSE }
+normExpression.parts.long.all.summary.log = read_tsv("../../data/bulkRNA/normExpression.parts.long.all.summary.log2.tsv")
+
+test = cor(normExpression.parts.long.all.summary.log)
+
+  pdf("../../supplementaryFigures/SuppFig14/SuppFig14.correlation.pdf", width = 4,height = 3)
+ComplexHeatmap::Heatmap(test)
+dev.off()
+ComplexHeatmap::Heatmap(test)
+
+```
+
+
+
+
+
+
+
+
+
+

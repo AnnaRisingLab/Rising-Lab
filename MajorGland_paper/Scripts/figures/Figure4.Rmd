@@ -1,0 +1,299 @@
+---
+title: "Figure4"
+author: "Johan"
+date: "01/02/2024"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+    code_folding: hide
+    df_print: paged
+---
+
+
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+library(Seurat)
+
+
+
+library(tidyverse)
+source("../customFunctions.R")
+source("../colorSchemes.R")
+source("../loadGeneInfo.R")
+
+select = dplyr::select
+
+summarise = dplyr::summarise
+
+repositoryPath = "~/git/Rising-Lab/MajorGland_paper"
+
+```
+
+
+# Geneinfo
+
+```{r load geneInfo}
+
+geneInfo = getGeneInfoFull(repositoryPath)
+
+bulk.major.PCA.list = read_csv("../../annotation/bulkRNA/majorGeneSet.csv") %>% inner_join(geneInfo)
+
+proteinInfo = getMajorAmpullateGlandProteinsSC(repositoryPath) %>%
+  mutate(geneNameProtein = factor(geneNameProtein, levels = geneOrder3)) %>%
+  arrange(geneNameProtein) 
+```
+
+# SampleInfo
+
+
+```{r}
+
+
+
+metaData_major.metadata = read_csv( "../../annotation/spatialData/majorGland.parts.spatial.csv")
+
+
+
+LarSco.spatial.combined = readRDS("~/git/Rising-Lab/MajorGland_paper/data/spatialRNA/raw_8_slides.RDS")
+LarSco.spatial.combined$SpotID = rownames(LarSco.spatial.combined@meta.data)
+
+LarSco.spatial.major = subset(LarSco.spatial.combined,SpotID %in% metaData_major.metadata$SpotID )
+
+Lsc.spa.major.annotated = addMetaDataToSpatialData(LarSco.spatial.major, newMetaData = metaData_major.metadata)
+rm(LarSco.spatial.major)
+
+
+Lsc.spa.major.annotated@meta.data %>%
+  ggplot( aes(x = x, y = y, color = majorAmpullateZones))+ 
+         geom_point()+ facet_wrap(.~Sample)
+
+
+
+metaData_major.metadata %>% group_by(Sample,majorAmpullateZones) %>% summarise(n = n())
+
+
+
+ 
+# Make sure there is the same number of cells and annotation
+
+
+
+```
+
+```{r}
+Lsc.spa.major.annotated <- SCTransform(Lsc.spa.major.annotated,
+                                              residual.features = bulk.major.PCA.list$scGeneName,
+                                              verbose = FALSE,
+                                              assay = "Spatial")
+Lsc.spa.major.annotated = SetIdent(Lsc.spa.major.annotated, value = "majorAmpullateZones")
+markers.spatial = 
+  FindAllMarkers(object = Lsc.spa.major.annotated,
+                         assay = "SCT",
+                         only.pos = TRUE)  %>% 
+  filter(p_val_adj < 0.05)
+
+#write_csv(markers.spatial,"../../annotation/spatialData/markerGenes.2024.all.csv")
+
+markers.spatial%>%
+  group_by(cluster) %>%
+  arrange(-avg_log2FC) %>%
+  mutate(rank = 1:n()) %>%
+  arrange(cluster,rank) %>%
+  rename(geneName = "gene") %>%
+  inner_join(proteinInfo) %>%
+  select(geneNameProtein,silkGroup,rank,avg_log2FC,p_val_adj,pct.1,pct.2) %>%
+  arrange(cluster,rank) %>%
+  filter(rank <101) ->
+  markers.spatial.PIS 
+
+
+markers.spatial.PIS
+#write_csv(markers.spatial.PIS,"../../annotation/spatialData/markerGenes.2024.PIS.csv")
+```
+
+# Figure 4C
+```{r}
+
+
+proteinInfo  %>% arrange(geneNameProtein) -> proteinInfo 
+zoneOrder = c("ZoneA","ZoneB","ZoneC")
+
+ Lsc.spa.major.annotated.protein <- SCTransform(Lsc.spa.major.annotated, verbose = FALSE, assay = "Spatial", residual.features = proteinInfo$scGeneName)
+ 
+Lsc.spa.major.annotated.protein@meta.data %>%
+  filter(!is.na(majorAmpullateZones)) %>%
+  group_by(majorAmpullateZones) %>%
+  slice_sample(n =200 ) -> Lsc.spa.major.annotated.protein.md
+
+Lsc.spa.major.annotated.protein.subset <- subset(x=Lsc.spa.major.annotated.protein, subset = SpotID %in% Lsc.spa.major.annotated.protein.md$SpotID )
+
+Lsc.spa.major.annotated.protein.subset$majorAmpullateZones = factor(Lsc.spa.major.annotated.protein.subset$majorAmpullateZones, levels = zoneOrder)
+
+DoHeatmap(Lsc.spa.major.annotated.protein,features = rev(proteinInfo$scGeneName), group.by ="majorAmpullateZones", raster = FALSE ,group.colors = AllColors ) + scale_fill_gradientn(colors = c("blue", "white", "red")) 
+ 
+ggsave("../../figures/figure4/figure4C_heatmap.pdf")
+
+```
+
+# Slide 1 left
+```{r}
+
+
+Lsc.spa.major.annotated.protein.4 =subset(Lsc.spa.major.annotated.protein,Sample == "Slide4")
+Lsc.spa.major.annotated.protein.4.left =subset(Lsc.spa.major.annotated.protein,x < 20000)
+
+Lsc.spa.major.annotated.protein.4.left@images = Lsc.spa.major.annotated.protein.4.left@images[4]
+
+DefaultAssay(Lsc.spa.major.annotated.protein.4.left) <- "Spatial"
+```
+
+# Figure 4A 
+```{r 4A}
+
+empty = SpatialFeaturePlot( Lsc.spa.major.annotated.protein.4.left, features = c("LASC000319"), pt.size.factor = 4, crop = TRUE,alpha = 0 )  + NoLegend()
+
+empty
+```
+
+# Figure 4B 
+
+```{r 4B}
+
+
+plot = SpatialDimPlot(Lsc.spa.major.annotated.protein.4.left,group.by = "majorAmpullateZones", cols =AllColors2 ,pt.size.factor = 4, crop = TRUE, ) + theme(legend.position="top") 
+
+
+plot
+```
+
+
+# Figure 4D 
+
+```{r 4D}
+
+ MaSp1a= SpatialFeaturePlot( Lsc.spa.major.annotated.protein.4.left, features = c("MaSp1a"), pt.size.factor = 4, crop = TRUE,alpha = 1 ) + ggtitle("MaSp1a")  
+
+ MaSp2b= SpatialFeaturePlot( Lsc.spa.major.annotated.protein.4.left, features = c("MaSp2b"), pt.size.factor = 4, crop = TRUE,alpha = 1 )  + ggtitle("MaSp2b")
+
+ MaSp3a= SpatialFeaturePlot( Lsc.spa.major.annotated.protein.4.left, features = c("MaSp3a"), pt.size.factor = 4, crop = TRUE,alpha = 1 )  + ggtitle("MaSp3a")
+
+LMa1= SpatialFeaturePlot( Lsc.spa.major.annotated.protein.4.left, features = c("LASC013229"), pt.size.factor = 4, crop = TRUE,alpha = 1 )  + ggtitle("SpiCE-LMa1")
+
+LMa2= SpatialFeaturePlot( Lsc.spa.major.annotated.protein.4.left, features = c("xync"), pt.size.factor = 4, crop = TRUE,alpha = 1 )  + ggtitle("SpiCE-LMa2")
+LMa3= SpatialFeaturePlot( Lsc.spa.major.annotated.protein.4.left, features = c("LASC000319"), pt.size.factor = 4, crop = TRUE,alpha = 1 )  + ggtitle("SpiCE-LMa3")
+ 
+MaSp1a
+MaSp2b
+MaSp3a
+LMa1
+LMa2
+LMa3
+
+```
+
+```{r}
+
+
+printSlide <- function(samplesSpatial,sample, pointSize = 1,newSample = sample, cropSlide = TRUE, fileNameExtra = "cropped.withLegend"){
+  
+  
+  slideN =subset(samplesSpatial,Sample == sample)
+  slideN@images = samplesSpatial@images[sample]
+  slideN =ScaleData(slideN)
+  
+  
+  plots = list()
+  plot = SpatialFeaturePlot(slideN, features = c("MaSp1a"), pt.size.factor = 1.3, crop = FALSE,alpha = 0 )+ ggtitle(label = sample)  + NoLegend() + ggtitle(newSample)
+  plots[[newSample]] = plot
+  
+  colorZones =   AllColors2[unique(slideN$majorAmpullateZones)]
+  plot = SpatialDimPlot(slideN,group.by = "majorAmpullateZones", cols =colorZones ,pt.size.factor = 1, crop = FALSE, ) + theme(legend.position="top") 
+  
+  
+  plots[["zones"]] = plot
+  
+  
+  for(i in  1:nrow(proteinInfo)){
+    GI = proteinInfo[i,]
+    gene = GI$scGeneName
+    silkName = GI$geneNameProtein
+    plot = SpatialFeaturePlot(slideN, features = c(gene), pt.size.factor = 1, crop = FALSE ) + ggtitle(label = silkName) 
+    plots[[as.character(silkName)]] = plot
+    
+    
+  }
+  return(plots)
+}
+
+```
+
+
+# Supp Fig 31-35
+## Supp Fig 31
+```{r}
+
+plots = printSlide(samplesSpatial =Lsc.spa.major.annotated.protein,
+                   sample = "Slide4",
+                   pointSize = 1,
+                   newSample = "Slide1" )
+
+
+plots
+```
+
+## Supp Fig 32
+```{r}
+
+
+names(plots)
+plots = printSlide(samplesSpatial =Lsc.spa.major.annotated.protein,
+                   sample = "Slide2",
+                   pointSize = 1,
+                   newSample = "Slide2" )
+
+
+plots
+```
+
+## Supp Fig 33
+```{r}
+
+
+```
+
+
+## Supp Fig 34
+```{r}
+
+
+names(plots)
+plots = printSlide(samplesSpatial =Lsc.spa.major.annotated.protein,
+                   sample = "Slide5",
+                   pointSize = 1,
+                   newSample = "Slide4" )
+
+
+plots
+```
+
+
+## Supp Fig 35
+```{r}
+
+
+names(plots)
+plots = printSlide(samplesSpatial =Lsc.spa.major.annotated.protein,
+                   sample = "Slide8",
+                   pointSize = 1,
+                   newSample = "Slide5" )
+
+
+plots
+```
+
+

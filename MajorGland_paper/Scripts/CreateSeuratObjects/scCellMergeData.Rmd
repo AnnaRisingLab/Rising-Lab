@@ -1,0 +1,201 @@
+---
+title: "SingleCellMergeData"
+author: "Johan"
+date: "10/25/2019"
+output: html_document
+
+params:
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+library(Seurat)
+library(tidyverse)
+
+source("../customFunctions.R")
+source("../colorSchemes.R")
+source("../loadGeneInfo.R")
+
+select = dplyr::select
+summarise = dplyr::summarise
+rename = dplyr::rename
+
+
+repositoryPath = "~/git/Rising-Lab/MajorGland_paper"
+
+```
+
+# GeneInfo
+
+```{r load geneInfo}
+
+scGeneInfo = getGeneInfoFull(repositoryPath)%>% 
+  mutate(Group = replace(x = Group,
+                        values = "Mito", 
+                        list = grepl(pattern = "_MT", x = Chr)
+                        )) %>%
+  mutate(Group = replace(x = Group,
+                        list = is.na(Group), 
+                        values = "Other"
+                        ))->
+scGeneInfo 
+
+proteinInfo = getMajorAmpullateGlandProteinsSC(repositoryPath) %>%
+  mutate(geneNameProtein = factor(geneNameProtein, levels = geneOrder3))
+
+
+
+
+```
+
+#SampleInfo
+
+
+
+```{r load doubletsInfo}
+sampleInfo = read_tsv("../../annotation/scRNA/Major/Single_cell_sampleinfo.2022.tsv")
+
+
+```
+
+
+```{r}
+# Sc info from previous run
+clusterOrder = c("ZoneA_MaSp2","ZoneA_MaSp1","ZoneA_SpiCE-LMa3",
+                 "ZoneABC","ZoneB_MaSp3","ZoneC_SpiCE-LMa1",
+                 "Duct_1","Duct_2") 
+
+major.sc.combined.integrated.2022 = readRDS("../../data/scRNA/majorGland/major.sc.combined.integrated.2022.rds")
+major.sc.combined.integrated.2022@meta.data %>% 
+  select(cellID,clusterZones) %>%
+  mutate(clusterZones = factor(clusterZones,levels = clusterOrder))->
+  MD.clusters
+
+umap = major.sc.combined.integrated.2022@reductions$umap
+
+
+```
+# Load 10x data
+
+```{r adding data to the analysis, include=FALSE}
+
+
+test = Read10X(data.dir="../../data/scRNA/majorGland/featureDirectories/P18856_2007", gene.column = 1)
+
+names = rownames(test)
+genes = intersect(names, scGeneInfo$gene_id) 
+MTgenes = setdiff(names, scGeneInfo$gene_id) 
+MTgenes_new = gsub(pattern = "_","-",x = MTgenes)
+
+scGeneInfo %>% filter(gene_id %in% genes) -> scGeneInfo
+oldName = c(scGeneInfo$gene_id,MTgenes)
+newName =  c(scGeneInfo$sc_gene_id,MTgenes_new)
+
+test.new = test[oldName,]
+rownames(test.new) = newName
+ CreateSeuratObject(
+    test.new	,	project	=	"test")
+
+```
+
+```{r }
+
+samples10x = list()
+for(i in 1:nrow(sampleInfo)){
+  sample = sampleInfo[i,] 
+  
+  dataDir = paste("../../data/scRNA/majorGland/featureDirectories/", 
+               sample$NGI_Sample_ID, sep ="/")
+  sample10x = Read10X(data.dir=dataDir, gene.column = 1)
+  sample10x[oldName,] -> sample10x.new
+  rownames(sample10x.new) = newName
+  samples10x[[sample$NGI_Sample_ID]] = sample10x.new 
+
+}
+
+
+
+
+scGeneInfo  %>% filter(gene_id %in% genes ) -> sameGenes 
+scGeneInfo %>% filter(!gene_id %in% genes ) -> otherGenes
+
+
+# Create individual seuratObjects
+
+samplesSeurat = list()
+for(i in 1:nrow(sampleInfo)){
+  sample = sampleInfo[i,] 
+  samplesSeurat[[sample$sampleID]] = CreateSeuratObject(
+    samples10x[[sample$NGI_Sample_ID]]	,	project	=	sample$sampleID)
+}
+
+#merging all samples
+samplesSeurat.other = samplesSeurat[-1]
+LarSco.combined <-
+  merge(samplesSeurat[[1]],
+        y=samplesSeurat.other,
+        add.cell.ids = sampleInfo$sampleID
+        )
+
+
+saveRDS(LarSco.combined,file = "../../data/scRNA/majorGland/scRNA.All.2024.rds")
+
+```
+
+
+```{r}
+
+
+LarSco.combined= readRDS( file = "~/Box/bridgeSpider/scRNA/scRNA.All.2024.rds")
+LarSco.combined$cellID = rownames(LarSco.combined@meta.data)
+
+
+
+LarSco.major = subset(LarSco.combined,cellID %in%  MD.clusters$cellID)
+LarSco.major= addMetaDataToSeruatObject(LarSco.major, MD.clusters)
+
+
+LarSco.major <- subset(LarSco.major, features = scGeneInfo$scGeneName)
+counts =Matrix::rowSums(GetAssayData(object = LarSco.major, slot = "counts"))
+readCounts.QC = data.frame(scGeneName = names(counts),readCounts = counts) %>%
+  filter(readCounts > 10)
+LarSco.major <- subset(LarSco.major, features = readCounts.QC$scGeneName)
+
+
+
+```
+
+
+
+## Integrate the three batches
+
+```{r }
+
+
+ifnb.list <- SplitObject(LarSco.major, split.by = "Batch")
+ifnb.list <- lapply(X = ifnb.list, FUN = SCTransform)
+features <- SelectIntegrationFeatures(object.list = ifnb.list, nfeatures = 3000)
+ifnb.list <- PrepSCTIntegration(object.list = ifnb.list, anchor.features = features)
+
+# normalize and identify variable features for each dataset independently
+immune.anchors <- FindIntegrationAnchors(object.list = ifnb.list, normalization.method = "SCT",
+    anchor.features = features)
+major.sct.integrated <- IntegrateData(anchorset = immune.anchors, normalization.method = "SCT")
+
+major.sct.integrated = readRDS("~/Box/bridgeSpider/scRNA/scRNA.major.integrated.2024.rds")
+
+major.sct.integrated <- RunPCA(major.sct.integrated, npcs = 30, verbose = FALSE, seed.use = 1234)
+major.sct.integrated@reductions$umap = umap
+major.sct.integrated <- FindNeighbors(major.sct.integrated, reduction = "pca", dims = 1:30, seed.use = 1234)
+
+
+saveRDS(major.sct.integrated, "../../data/scRNA/majorGland/scRNA.major.integrated.2024.rds")
+
+```
+
+
+
+
+

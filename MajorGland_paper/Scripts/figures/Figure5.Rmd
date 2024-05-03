@@ -1,0 +1,159 @@
+---
+title: "Figure5"
+author: "Johan"
+date: "01/02/2024"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+    code_folding: hide
+    df_print: paged
+---
+
+
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+library(Seurat)
+
+
+
+library(tidyverse)
+library(patchwork)
+source("../customFunctions.R")
+source("../colorSchemes.R")
+source("../loadGeneInfo.R")
+
+select = dplyr::select
+
+summarise = dplyr::summarise
+
+repositoryPath = "~/git/Rising-Lab/MajorGland_paper"
+
+```
+
+
+# Geneinfo
+
+```{r load geneInfo}
+
+geneInfo = getGeneInfoFull(repositoryPath)
+
+bulk.major.PCA.list = read_csv("../../annotation/bulkRNA/majorGeneSet.csv") %>% inner_join(geneInfo)
+
+proteinInfo = getMajorAmpullateGlandProteinsSC(repositoryPath) %>%
+  mutate(geneNameProtein = factor(geneNameProtein, levels = geneOrder3)) %>%
+  arrange(geneNameProtein) 
+```
+
+# SingleCell data
+
+
+# Figure5
+
+```{r combine}
+
+major.sct.integrated = readRDS("../../data/scRNA/majorGland/scRNA.major.integrated.2024.rds")
+
+
+DefaultAssay(major.sct.integrated) <- "integrated"
+
+# Visualization
+major.sct.integrated$clusterZones = factor(major.sct.integrated$clusterZones, levels = clusterOrder)
+p3 <- DimPlot(major.sct.integrated, reduction = "umap", group.by = "clusterZones", label = TRUE,cols = AllColors2)+ NoLegend()
+
+proteinInfo %>% arrange(geneNameProtein) -> proteinInfo
+
+HM = DoHeatmap(object = major.sct.integrated,
+          features = rev(proteinInfo$scGeneName), 
+          group.by = "clusterZones",
+          assay = "integrated",
+          raster = FALSE , 
+          group.colors = AllColors2,
+          size = 4) +
+  scale_fill_gradientn(colors = c("blue", "white", "red")) 
+
+
+p3+HM+ plot_layout(guides = "collect")
+
+
+ggsave("../../figures/figure5/figure5.pdf", width = 20, height = 8)
+
+```
+
+#Find markers
+
+```{r}
+
+
+
+#major.sct.integrated = SetIdent(major.sct.integrated, value ="clusterZones")
+
+ 
+#with SCT    
+#major.sct.integrated =PrepSCTFindMarkers(major.sct.integrated)
+
+#markers.sct.integrated = FindAllMarkers(major.sct.integrated, only.pos = TRUE,assay = "integrated") 
+  
+
+#markers.sct.integrated %>% 
+#  rename(scGeneName = "gene")%>%
+#  inner_join(scGeneInfo) %>%
+#  group_by(cluster) %>%
+#  arrange(cluster,p_val_adj) ->
+#  markers.sct.integrated
+
+#write_csv(x = markers.sct.integrated, "../../annotation/scRNA/Major/Markers.SCT.integrated.majorCluster.all.2024.csv" )
+
+markers.sct.integrated = read_csv("../../annotation/scRNA/Major/Markers.SCT.integrated.majorCluster.all.2024.csv")
+
+
+
+  markers.sct.integrated %>% ungroup() %>%
+    group_by(cluster) %>%
+    arrange(p_val_adj,-pct.1 ) %>%
+    mutate(rank = 1:length(scGeneName)) %>%
+    filter(rank < 101) %>%
+    select(2:7,rank,geneName) %>%
+    arrange(cluster,p_val_adj,rank) %>%
+    inner_join(proteinInfo) %>%#
+    select(geneNameProtein,rank,cluster,p_val_adj,avg_log2FC,pct.1,pct.2) ->
+    Markergenes.sc.all.sctransform
+    
+  
+    
+Markergenes.sc.all.sctransform
+
+write_csv(Markergenes.sc.all.sctransform ,"../../annotation/scRNA/Major/Markers.SCT.integrated.majorCluster.18PIS.2024.csv" )
+
+
+
+
+
+#markers.sct.single = FindAllMarkers(major.sct.integrated, only.pos = TRUE,assay = "SCT") 
+  
+
+#markers.sct.single %>% 
+#  rename(scGeneName = "gene")%>%
+#  inner_join(scGeneInfo) %>%
+#  group_by(cluster) %>%
+#  arrange(cluster,p_val_adj,-pct.1) ->
+#  markers.sct.single
+
+#  markers.sct.single %>% ungroup() %>%
+#    group_by(cluster) %>%
+#    arrange(p_val_adj) %>%
+#    mutate(rank = 1:length(scGeneName)) %>%
+#    select(2:7,rank,geneName) %>%
+#    arrange(cluster,p_val_adj,rank) %>%
+#    inner_join(proteinInfo) %>%
+#    select(geneNameProtein,rank,cluster,p_val_adj,avg_log2FC,pct.1,pct.2) ->
+#    Markergenes.sc.all.sctransform
+
+
+```
+
+

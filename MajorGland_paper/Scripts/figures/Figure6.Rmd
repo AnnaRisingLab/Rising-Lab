@@ -1,0 +1,514 @@
+---
+title: "Figure6"
+author: "Johan"
+date: "01/02/2024"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+    code_folding: hide
+    df_print: paged
+---
+
+
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+library(Seurat)
+
+
+
+library(tidyverse)
+source("../customFunctions.R")
+source("../colorSchemes.R")
+source("../loadGeneInfo.R")
+
+select = dplyr::select
+
+summarise = dplyr::summarise
+
+repositoryPath = "~/git/Rising-Lab/MajorGland_paper"
+
+```
+
+
+# Geneinfo
+
+```{r load geneInfo}
+
+geneInfo = getGeneInfoFull(repositoryPath)
+
+bulk.major.PCA.list = read_csv("../../annotation/bulkRNA/majorGeneSet.csv") %>% inner_join(geneInfo)
+
+proteinInfo = getMajorAmpullateGlandProteinsSC(repositoryPath) %>%
+  mutate(geneNameProtein = factor(geneNameProtein, levels = geneOrder3)) %>%
+  arrange(geneNameProtein) 
+```
+
+# QuPath data
+```{r}
+measurments.all = read_csv("../../annotation/spatialData/QUpathMeasurements.csv") 
+
+
+measurments.all %>% select(Image,slide,Class,
+                       x,y,
+                       Eosin_Mean,Eosin_Stdev,
+                       Hematoxylin_Mean,Hematoxylin_Stdev,
+                       Area,Perimeter) %>%
+  filter(!is.na(Class)) %>%
+  filter(Class!= "Region*") ->
+  measurments
+
+
+summarise = dplyr::summarise
+  
+measurments %>% filter(!is.na(Eosin_Stdev)) %>% group_by(slide) %>%
+  summarise(Em = mean(Eosin_Mean),
+            Esd = sd(Eosin_Mean),
+            Hm = mean(Hematoxylin_Mean),
+            Hsd = sd(Hematoxylin_Mean))  %>%
+  inner_join(measurments) %>%
+  mutate(Eosin = (Eosin_Mean-Em) / Esd) %>%
+  mutate(Hematoxylin = (Hematoxylin_Mean-Hm) / Hsd) %>%
+  filter(!is.na(Class))->
+  measurments.2 
+
+  
+
+measurments.2 %>% 
+  mutate(slide = "All") ->
+  measurments.2.all
+
+measurments.2.all =rbind(measurments.2,measurments.2.all)
+```
+
+
+
+
+
+## suppFig38
+```{r suppFig38}
+
+split = ggplot(measurments.2.all,aes(x =Hematoxylin, y = Eosin, color = Class ) )+
+  geom_point() + facet_wrap(.~slide)+  scale_color_manual(values = AllColors2) + theme_light()
+all = 
+  measurments.2 %>%
+  ggplot(aes(x =Hematoxylin, y = Eosin, color = Class ) )+
+  geom_point()+  scale_color_manual(values = AllColors2) + theme_light()
+
+all+split + patchwork::plot_layout(guides = "collect") -> supFig38
+ggsave("../../supplementaryFigures/SuppFig38/supplementaryFigure38.pdf",supFig38)
+
+```
+## Figure 6E
+
+```{r Figure 6E}
+
+
+library(ggpubr)
+  
+  measurments.2 %>%
+  filter(Class == "ZoneA") %>%
+  ggscatter( x = "Perimeter", y = "Hematoxylin",
+   color = "#FDE725FF", shape = , size = 1, # Points color, shape and size
+   add = "reg.line",  # Add regressin line
+   add.params = list(color = "blue", fill = "lightgray"), # Customize reg. line
+   conf.int = TRUE, # Add confidence interval
+   cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+   cor.coeff.args = list(method = "pearson", label.x = 1300, label.sep = "\n")
+   ) ->
+  hema
+
+measurments.2  %>%
+  filter(Class == "ZoneA")%>% 
+  mutate(ZoneA = "Distal") %>%
+  mutate(ZoneA = replace(ZoneA,Perimeter >500, "Middle")) %>%
+  mutate(ZoneA = replace(ZoneA,Perimeter >1000, "Proximal"))  %>%
+  group_by(ZoneA) %>%
+  summarise(n = n())
+
+hema+
+  geom_vline(xintercept = 500)+ 
+  geom_vline(xintercept = 1000)
+
+  ggsave("../../figures/figure6/figure6E.pdf", width = 3, height = 1)
+```
+
+
+
+
+### Calculate size of region
+```{r}
+
+measurments %>% group_by(slide) %>%
+  summarise(xmax = max(x), ymax = max(y), ymin = min(y),xmin = min(x),
+            xsep = xmax-xmin, ysep = ymax-ymin) %>%
+  select(slide,xsep,ysep)->size  
+
+measurments.all %>% select(slide,Class,
+                       x,y,Area,minDiameter) %>%
+  filter(Class == "Region*") %>%
+  mutate(maxDiameter = Area / minDiameter) %>%
+  inner_join(size) ->
+  measurments.size
+
+measurments.size %>% 
+  filter(xsep > ysep) %>%
+  mutate(xDiameter = maxDiameter) %>%
+  mutate(yDiameter = minDiameter) ->
+  measurments.size.1
+measurments.size %>% 
+  filter(xsep < ysep) %>%
+  mutate(yDiameter = maxDiameter) %>%
+  mutate(xDiameter = minDiameter) ->
+  measurments.size.2
+bind_rows(measurments.size.1,measurments.size.2) %>%
+  mutate(xmin = x - xDiameter/2) %>%
+  mutate(xmax = x + xDiameter/2) %>%
+  mutate(ymin = y - yDiameter/2) %>%
+  mutate(ymax = y + yDiameter/2) %>%
+  select(slide,x,y,xmin,xmax,ymin,ymax,xDiameter,yDiameter) %>%
+  mutate(ratio = xDiameter/yDiameter)->
+  measurments.size
+
+
+measurments.size %>% select(slide,xmin,ymin,xDiameter,yDiameter,ratio) %>%
+  inner_join(measurments.2) %>%
+  mutate(x_new = (x - xmin)/xDiameter*100, y_new = (y-ymin)/yDiameter*100) ->
+  measurments.3
+
+
+measurments.3 %>%
+  ggplot( aes(x = x_new, y = y_new, color = Class))+ 
+         geom_point()+ facet_wrap(.~slide)
+
+
+
+
+```
+
+
+
+
+# Spatial transcriptome data
+```{r}
+
+
+Lsc.spa.glands = readRDS("../../data/spatialRNA/sixSamples.glands.1.2.3.4.5.8.RDS")
+
+positions.all = read_csv(file =  "../../data/spatialRNA/coordinates.csv")
+
+
+```
+
+
+## Major ampullate gland annotation
+```{r}
+
+metaData_major = read_csv("../../annotation/spatialData/majorGland.parts.spatial.csv")
+
+Lsc.spa.major.annotated =  subset(Lsc.spa.glands, SpotID %in%metaData_major$SpotID )
+
+
+Lsc.spa.major.annotated = addMetaDataToSpatialData(Lsc.spa.major.annotated, newMetaData = metaData_major)
+
+
+Lsc.spa.major.annotated@meta.data %>%
+  ggplot( aes(x = x, y = y, color = majorAmpullateZones))+ 
+         geom_point()+ facet_wrap(.~Sample)
+
+```
+
+
+## Connect positions of spatial RNA and contect data
+```{r}
+
+metaData_major %>%
+  mutate(ID = paste("transcriptomics",Sample,x,y, sep =":" ))->
+  positions 
+
+positions %>% group_by(Sample) %>%
+  summarise(xmax = max(x), ymax = max(y), ymin = min(y),xmin = min(x),
+            xsep = xmax-xmin, ysep = ymax-ymin) %>%
+  select(Sample,xmin, ymin,xsep,ysep) ->size.t 
+
+
+
+
+
+positions %>%
+  inner_join(size.t) %>%
+  mutate(x_new = (x - xmin)/xsep*100, 
+         y_new = (y - ymin)/ysep*100) ->
+  positions
+
+  
+positions%>%
+  ggplot( aes(x = x_new, y = y_new, color = majorAmpullateZones))+ 
+         geom_point()+ facet_wrap(.~Sample)  
+measurments.3 %>%
+  ggplot( aes(x = x_new, y = y_new, color = Class))+ 
+         geom_point()+ facet_wrap(.~slide)
+
+
+positions %>% mutate(type = "spatial") -> positions
+measurments.3 %>% mutate(type = "optical") %>%
+  rename(majorAmpullateZones = "Class") %>%
+  rename(Sample = "slide")-> measurments.3
+
+bind_rows(positions,measurments.3) ->
+  positions.both
+
+
+positions.both %>%
+  ggplot( aes(x = x_new, y = y_new,
+              color = majorAmpullateZones,shape = type))+ 
+         geom_point()+ facet_wrap(.~Sample)
+#ggsave("~/Box/bridgeSpider/paper1/main/figures/figure4/spatial.qupath.combination.pdf", width = 16, height = 8)
+
+```
+
+###Function
+```{r}
+
+getClosestPart <- function(df1, df2, zone){
+  df1.zone = df1 %>%
+    filter(majorAmpullateZones == zone) 
+  df2.zone = df2 %>%
+    filter(majorAmpullateZones == zone)
+  if(nrow(df2.zone) > 0 & nrow(df1.zone) > 0){
+    dist = dist(x =df1.zone[,c("x_new","y_new")],
+                y = df2.zone[c("x_new","y_new")] ,
+                method = "euclidean" )
+    crossdist <- as.data.frame(`dim<-`(c(dist), dim(dist)))
+    rownames(crossdist) <- df1.zone$ID 
+    colnames(crossdist) <- df2.zone$ID 
+    crossdist %>% rownames_to_column(var = "opticalID" ) %>%
+      pivot_longer(cols = -opticalID,
+                   names_to = "ID",
+                   values_to = "distance") %>%
+      distinct()->
+      crossdist
+    crossdist %>% group_by(ID) %>%
+      summarise(closest = min(distance)) %>%
+      ungroup()%>%
+      inner_join(crossdist) %>%
+      filter(distance == closest) %>%
+      select(ID,opticalID) ->
+      part.closest 
+    return (part.closest)
+  }else{
+    return(NULL)
+  }
+}
+
+```
+
+```{r }
+
+
+positions.both %>% select(Sample,type,majorAmpullateZones,x,y,x_new,y_new) %>%
+  mutate(ID = paste(Sample,type,majorAmpullateZones,x,y, sep = ":")) ->
+  positions.both
+  
+
+closest = list()
+for(sample in unique(positions.both$Sample)){
+  df.sample = positions.both %>% 
+      filter(Sample == sample) 
+  closestSample = list()
+  for(zone in c("ZoneA","ZoneB","ZoneC")){
+    df.sample.1 = df.sample %>% 
+      filter(type == "spatial")
+    df.sample.2 = df.sample %>% 
+      filter(type == "optical")
+    closestSample[[zone]] = getClosestPart(df1 = df.sample.2,df2 = df.sample.1,zone =zone)
+  }
+  closest[[sample]] = bind_rows(closestSample)
+}
+closestObject = bind_rows(closest)
+
+
+positions%>%
+  mutate(ID = paste(Sample,type,majorAmpullateZones,x,y, sep = ":")) ->
+  positions
+
+measurments.3%>%
+  mutate(opticalID = paste(Sample,"optical",majorAmpullateZones,x,y, sep = ":")) ->
+  measurments.3
+
+
+measurments.3 %>% select(opticalID, Em, Esd,Hm,Hsd,Eosin_Mean,Eosin_Stdev,
+                         Hematoxylin_Mean,Hematoxylin_Stdev,Area,Perimeter,
+                         Eosin,Hematoxylin)-> opticalInfo
+positions %>% inner_join(closestObject) %>% inner_join(opticalInfo) ->
+  positions
+
+
+
+positions %>%
+  filter(Sample == "Slide4") %>%
+  filter(x_new < 50) %>%
+  ggplot( aes(x = x_new, y = -y_new,
+              color = opticalID,shape = majorAmpullateZones))+ 
+         geom_point()+ facet_wrap(.~Sample) +theme_light()+ NoLegend() 
+
+#ggsave("~/Box/bridgeSpider/paper1/main/figures/figure4/spatial.qupath.annotation.pdf", width = 5, height = 6)
+
+
+
+positions %>% group_by(opticalID) %>%
+  summarise(nrOfSpots = n()) %>%
+  ungroup() %>%
+  inner_join(positions)-> positions
+
+positions%>%filter(majorAmpullateZones == "ZoneA") %>% ggplot(aes(x = Perimeter, y = nrOfSpots))+ geom_point() + geom_smooth(method = "lm")
+
+
+
+
+
+```
+
+
+## Merge all slides and join spatial and optical data.
+# Figure 6D
+
+```{r}
+
+probabilities = read_csv("../../results/deconvolution/major/CARD.50.csv")
+
+probabilities %>%
+  select(SpotID,`ZoneA_SpiCE-LMa3`,ZoneA_MaSp1,ZoneA_MaSp2,ZoneB_MaSp3,`ZoneC_SpiCE-LMa1`,Duct_1,Duct_2 ,ZoneABC ) %>%
+  inner_join(positions) ->
+  test.prob
+
+test.prob %>% 
+  filter(majorAmpullateZones == "ZoneA") %>% 
+  select(SpotID,`ZoneA_SpiCE-LMa3`,ZoneA_MaSp1,ZoneA_MaSp2,ZoneA_MaSp2,ZoneB_MaSp3,`ZoneC_SpiCE-LMa1`,Duct_1,Duct_2 ,ZoneABC,Perimeter ) %>% 
+  pivot_longer(cols = c(`ZoneA_SpiCE-LMa3`,ZoneA_MaSp1,ZoneA_MaSp2,ZoneA_MaSp2,ZoneB_MaSp3,`ZoneC_SpiCE-LMa1`,Duct_1,Duct_2 ,ZoneABC), values_to = "prob", names_to ="Celltype" ) %>%
+  ggplot(aes(x = Perimeter, y = prob, color = Celltype )) + geom_point() + geom_smooth()
+
+
+
+probabilities %>% select(SpotID,`ZoneA_SpiCE-LMa3`,ZoneA_MaSp1,ZoneA_MaSp2) %>% inner_join(positions) ->
+  test.prob
+
+test.prob %>% 
+  filter(majorAmpullateZones == "ZoneA") %>% 
+  select(SpotID,`ZoneA_SpiCE-LMa3`,ZoneA_MaSp1,ZoneA_MaSp2,ZoneA_MaSp2,Perimeter ) %>% 
+  pivot_longer(cols = c(`ZoneA_SpiCE-LMa3`,ZoneA_MaSp1,ZoneA_MaSp2,ZoneA_MaSp2),
+               values_to = "prob", names_to ="Celltype" ) %>%
+  ggplot(aes(x = Perimeter, y = prob, color = Celltype )) + geom_point() + geom_smooth()
+
+#ggsave("~/Box/bridgeSpider/paper1/main/figures/figure6/prob.perimeter.pdf")
+
+
+test.prob %>% 
+  filter(majorAmpullateZones == "ZoneA") %>% 
+  select(SpotID,`ZoneA_SpiCE-LMa3`,ZoneA_MaSp1,ZoneA_MaSp2,Perimeter ) %>% 
+  pivot_longer(cols = c(`ZoneA_SpiCE-LMa3`,
+                        ZoneA_MaSp1,
+                        ZoneA_MaSp2),
+               values_to = "prob",
+               names_to ="Celltype" ) %>%
+  mutate(prob = replace(prob, prob<0.001,0.001)) %>%
+  ggplot(aes(x = Perimeter, y = log2(prob), color = Celltype )) + geom_point()+
+  geom_smooth(method = "lm") + theme_light()+  
+  scale_colour_manual(values = AllColors2)   -> prob.perimeter.plot
+
+ggsave("../../figures/figure6/figure6D.pdf",prob.perimeter.plot)
+prob.perimeter.plot
+
+```
+
+
+```{r}
+probabilities %>%
+  select(SpotID,`ZoneA_SpiCE-LMa3`,ZoneA_MaSp1,ZoneA_MaSp2,ZoneB_MaSp3,`ZoneC_SpiCE-LMa1`,Duct_1,Duct_2 ,ZoneABC ) %>%
+  inner_join(positions) ->
+  test.prob
+
+test.prob %>% 
+  filter(majorAmpullateZones == "ZoneA") %>% 
+  select(SpotID,`ZoneA_SpiCE-LMa3`,ZoneA_MaSp1,ZoneA_MaSp2,
+         ZoneB_MaSp3,`ZoneC_SpiCE-LMa1`,
+         Duct_1,Duct_2 ,ZoneABC,Perimeter ) %>%
+  mutate(zone = "Distal") %>%
+  mutate(zone = replace(zone,Perimeter >500, "Middle")) %>%
+  mutate(zone = replace(zone,Perimeter >1000, "Proximal")) %>%
+  mutate(zone = factor(zone, levels =c ("Distal","Middle","Proximal"))) ->
+  test.prob.zoneA
+
+test.prob.zoneA %>%
+  group_by(zone) %>%
+  summarise(`ZoneA_SpiCE-LMa3` = mean(`ZoneA_SpiCE-LMa3`),
+             `ZoneA_MaSp1` = mean(ZoneA_MaSp1),
+             `ZoneA_MaSp2` = mean(ZoneA_MaSp2), 
+             `ZoneB_MaSp3` = mean(ZoneB_MaSp3), 
+             `ZoneC_SpiCE-LMa1` = mean(`ZoneC_SpiCE-LMa1`), 
+             `ZoneABC` = mean(ZoneABC),
+             `Duct_1` = mean(Duct_1),
+             `Duct_1` = mean(Duct_2)) %>%
+  pivot_longer( -zone, names_to = "cluster", values_to = "prob") ->
+  test.prob.zoneA.summary
+
+test.prob.zoneA.summary %>%
+  mutate(cluster = factor(cluster, levels =rev(clusterOrder) )) %>%
+  ggplot(aes(x = zone, y = prob, fill = cluster)) +
+  geom_col(position="fill") + scale_fill_manual(values = AllColors2)+ theme_light()+  
+  scale_colour_manual(values = AllColors2)-> zoneAplot
+
+  
+test.prob %>%
+  group_by(majorAmpullateZones) %>%
+  summarise(`ZoneA_SpiCE-LMa3` = mean(`ZoneA_SpiCE-LMa3`),
+             `ZoneA_MaSp1` = mean(ZoneA_MaSp1),
+             `ZoneA_MaSp2` = mean(ZoneA_MaSp2), 
+             `ZoneB_MaSp3` = mean(ZoneB_MaSp3), 
+             `ZoneC_SpiCE-LMa1` = mean(`ZoneC_SpiCE-LMa1`), 
+             `ZoneABC` = mean(ZoneABC),
+             `Duct_1` = mean(Duct_1),
+             `Duct_1` = mean(Duct_2)) %>%
+  pivot_longer( -majorAmpullateZones, names_to = "cluster", values_to = "prob") ->
+  test.prob.zones.summary
+
+test.prob.zones.summary %>%
+  filter(majorAmpullateZones == "ZoneB") %>% 
+  mutate(cluster = factor(cluster, levels =rev(clusterOrder) )) %>%
+  ggplot(aes(x = majorAmpullateZones, y = prob, fill = cluster)) +
+  geom_col(position="fill") + scale_fill_manual(values = AllColors2)+ theme_light()+  
+  scale_colour_manual(values = AllColors2) -> zoneBplot
+
+test.prob.zones.summary %>%
+  filter(majorAmpullateZones == "ZoneC") %>% 
+  mutate(cluster = factor(cluster, levels =rev(clusterOrder) )) %>%
+  ggplot(aes(x = majorAmpullateZones, y = prob, fill = cluster)) +
+  geom_col(position="fill") + scale_fill_manual(values = AllColors2)+ theme_light()+  
+  scale_colour_manual(values = AllColors2) -> zoneCplot
+
+layout = "AAABC"  
+
+(zoneAplot+
+        theme(axis.title.x = element_blank()))+
+(zoneBplot+ theme(axis.text.y=element_blank(),
+        axis.title.y = element_blank(),
+        axis.title.x = element_blank()))+
+(zoneCplot + theme(axis.text.y=element_blank(),
+        axis.title.y = element_blank(),
+        axis.title.x = element_blank()))+
+  plot_layout(design = layout,guides = 'collect')& theme(legend.position = 'none')
+ggsave("../../figures/figure6/figure6F.pdf")
+```
+
+
+
+
+
+
+
+
+

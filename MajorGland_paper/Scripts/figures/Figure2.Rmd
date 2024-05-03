@@ -1,0 +1,2205 @@
+---
+title: "Figure 1 BulkRNA"
+author: "Johan"
+date: "01/04/2024"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+    code_folding: hide
+    df_print: paged
+
+
+---
+
+
+
+
+
+
+```{r setup, include=FALSE}
+
+repositoryPath = "~/git/Rising-Lab/MajorGland_paper"
+
+#source("~/git/RNAmappingPipeline/R/ExpressionAnalysisFunctions.R")
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+
+library(knitr)
+#install.packages("kableExtra")
+#library("viridis")     
+
+library(RColorBrewer)
+#library(GenomicFeatures)
+library(DESeq2)
+
+library(ropls)
+
+library(ggforce)
+library(patchwork)
+library(ggpubr)
+
+
+rename <- dplyr::rename
+
+
+source("../loadGeneInfo.R")
+source("../colorSchemes.R")
+source("../customFunctions.R")
+summarise = dplyr::summarise               
+select = dplyr::select
+group_by = dplyr::group_by
+
+
+```
+
+
+# Functions
+
+
+## Gene information
+```{r Gene information, message=FALSE, warning=FALSE}
+
+geneInfo =  getGeneInfoFull(repositoryPath = repositoryPath) %>%
+  select(gene_id, geneName, lascID,scGeneName,Chr,Start, End)
+GI = getGeneInfoFull(repositoryPath = repositoryPath)
+geneInfo.transcript = addTranscriptInfo(geneInfo = GI,repositoryPath = repositoryPath) %>%group_by(gene_id) %>% 
+  arrange(-tx_len ) %>% slice_head(n = 1) %>% select(gene_id,geneName,tx_name,tx_len)
+
+
+
+```
+
+
+
+## Parameters
+```{r Parameters, message=FALSE, warning=FALSE}
+
+minExpressionCutoff =20
+DataGenerated = TRUE
+
+orderSilkGroup = c("MaSp1","MaSp2","MaSp3","MaSp4","AmSp-like","Spice-LMa","Not in silk")
+
+
+proteinInfo = getMajorAmpullateGlandProteins(repositoryPath = repositoryPath)  %>%
+  mutate(silkGroup = factor(silkGroup,levels =orderSilkGroup))
+
+## Add length
+
+
+geneInfo = getGeneInfoFull(repositoryPath)
+transcriptInfo = addTranscriptInfo(repositoryPath = repositoryPath,geneInfo = geneInfo) %>%
+  group_by(gene_id) %>%
+  arrange(-tx_len) %>%
+  slice_head(n = 1) %>% ungroup()
+
+
+
+merged_df <- read.csv("../../annotation/proteomics/proteinComposition.csv") %>%
+  mutate(tx_name = Protein.ID) %>%
+  inner_join(transcriptInfo) %>%
+  select(Length,geneName) %>% inner_join(proteinInfo) ->
+  proteinInfo
+```
+
+
+
+# Protein analysis
+
+## Figure2A
+
+### GlandSilk data
+```{r GlandSilk data, message=FALSE, warning=FALSE}
+
+GlandSilkFile =  paste("../../data/proteomics/majorSilk/Samples Report With Clusters for Samples_dope_gland_silk.xls")
+
+geneInfo.transcript = transcriptInfo %>% select(geneName,gene_id,tx_name)
+
+old = read_tsv(GlandSilkFile,skip = 55) %>%
+  rename(tx_name = "Accession Number") %>%
+  inner_join(geneInfo.transcript) %>%
+  select(geneName,10:24)
+
+colNames_GlandSilk = colnames(old)
+new = read_tsv(GlandSilkFile,skip = 55) %>%
+  rename(geneName = "Accession Number") %>%
+  inner_join(geneInfo.transcript) %>%
+  select(geneName,10:24)
+
+GlandSilk = bind_rows(old,new) %>%
+  pivot_longer(-geneName, names_to = "sample", values_to = "Percentage_of_Total_Spectra") %>%
+  mutate(Percentage_of_Total_Spectra = gsub("%","",Percentage_of_Total_Spectra))%>%
+  mutate(Percentage_of_Total_Spectra = as.numeric(gsub(",",".",Percentage_of_Total_Spectra)))
+  
+GlandSilk %>% 
+  dplyr::group_by(sample ) %>%
+  dplyr::summarise(TotalPercentage_of_Total_Spectra = sum(Percentage_of_Total_Spectra)) %>%
+  inner_join(GlandSilk) %>%
+  mutate(fractionMatches = Percentage_of_Total_Spectra/TotalPercentage_of_Total_Spectra) ->
+GlandSilk
+
+GlandSilk.metaData = GlandSilk %>% distinct(sample) %>%
+  mutate(type = c(rep("dope",3),rep("gland",3),rep("silk",9))) %>%
+  mutate(solution = c(rep("UREA",6),rep("HFIP",3),rep("LiBr",3),rep("Urea",3))) %>%
+  mutate(rep = c(rep(1:3,5)))
+  
+
+GlandSilk %>% inner_join(GlandSilk.metaData) %>%  filter(type == "silk") %>%
+  filter(Percentage_of_Total_Spectra > 0.03) %>%
+  group_by(geneName, solution) %>%
+  summarise(n = n()) %>%
+  group_by(geneName ) %>%
+  summarise(n = n()) %>%
+  filter(n == 3)
+
+
+
+
+
+```
+
+### Native Silk
+```{r Native Silk, message=FALSE, warning=FALSE}
+
+
+SilkSamples = GlandSilk.metaData %>% filter(type == "silk")  
+protein.silk = GlandSilk %>% inner_join(SilkSamples) 
+
+
+
+protein.silk %>%
+  group_by(sample) %>%
+  summarise(totalFraction = sum(fractionMatches)) %>%
+  inner_join(protein.silk) %>%
+  mutate(percent = fractionMatches/totalFraction*100) %>%
+  group_by(geneName,solution) %>%
+  summarise( percent = sum(percent)/3) %>% 
+  filter(percent > 0.003) -> 
+  protein.silk.all
+
+
+
+
+
+protein.silk.all%>%
+  inner_join(proteinInfo) %>%
+  mutate(type = "silk")->
+  protein.silk
+
+
+protein.silk %>%
+  group_by(geneNameProtein,type) %>% 
+  summarise(percent_mean = mean(percent), percent_sd = sd(percent)) %>%
+  mutate(solution = "All") %>%
+  arrange(-percent_mean)  ->
+  protein.silk.summary.joined
+
+
+protein.silk %>%
+  group_by(geneNameProtein,type,solution) %>%
+  summarise(percent_mean = mean(percent), percent_sd = sd(percent)) %>%
+  arrange(-percent_mean)  ->
+  protein.silk.summary.solutions
+
+  
+
+
+protein.silk.summary = bind_rows(protein.silk.summary.joined,protein.silk.summary.solutions) %>%
+  arrange(solution,type,-percent_mean) ->protein.silk.summary
+  
+
+proteinInfo %>%
+  inner_join(protein.silk) %>%
+  mutate(percentM = percent) %>%
+  group_by(geneNameProtein,type,solution) %>%
+  summarise(percent_mean = mean(percentM), percent_sd = sd(percentM)) %>%
+  arrange(type,solution,-percent_mean)  ->
+  protein.silk.summary.solutions
+  
+protein.silk.summary.solutions %>%
+  group_by(type,solution) %>%
+  summarise(total = sum(percent_mean)) %>%
+  inner_join(protein.silk.summary.solutions) %>%
+  mutate(percent_mean = (percent_mean/total)*100 ) ->
+  protein.silk.summary.solutions
+
+  
+protein.silk.summary.solutions %>% filter(solution == "LiBr") %>%
+  inner_join(proteinInfo)%>%
+  mutate(silkGroup = factor(silkGroup,levels = orderSilkGroup))%>%
+  ggplot(aes(x = "Silk", y = percent_mean, fill = silkGroup)) +
+  geom_bar(, stat = "identity", position="fill" ) + 
+  theme_light()+
+  
+  coord_polar("y", start=0) + theme(axis.text.y=element_text(size=50), )  -> plot.Spectra
+
+plot.Spectra
+
+
+
+
+proteinInfo %>% arrange(geneNameProtein) %>% select(geneName, geneNameProtein)
+
+
+
+protein.silk.all %>% pivot_wider(names_from = solution, values_from = percent, values_fill = 0)  %>%
+  arrange(-Urea) %>% filter(Urea >0.02) %>% inner_join(geneInfo) %>% left_join(proteinInfo) ->
+  protein.silk.all
+
+
+write_csv(protein.silk.all,"../../results/proteomics/major/proteinsInSilk.unfiltered.2024.csv") 
+
+```
+
+
+
+
+### Figure 2A silk
+```{r Figure 2A silk, message=FALSE, warning=FALSE}
+protein.silk.summary.joined%>% inner_join(proteinInfo) ->protein.silk.summary.joined.figure2a
+
+
+protein.silk.summary.joined.figure2a %>% arrange(-percent_mean)
+
+
+protein.silk.summary.joined.figure2a %>% 
+  group_by(silkGroup) %>%
+  summarise(percent_mean = sum(percent_mean)) %>%
+  mutate(silkGroup = factor(silkGroup,levels = orderSilkGroup)) ->
+  protein.silk.summary.joined.figure2a
+protein.silk.summary.joined.figure2a %>%
+  ggplot(aes(x = "Silk", y = percent_mean, fill = silkGroup)) +
+  geom_bar(, stat = "identity", position="fill" ) + 
+  theme_light()+
+  coord_polar("y", start=0) 
+
+ggsave("../../figures/figure2/2A.silk.pdf")
+
+
+
+protein.silk.summary.joined.figure2a %>%
+  mutate(total = sum(percent_mean)) %>%
+  mutate(new = percent_mean/total)
+
+
+```
+
+
+### Gland
+```{r Gland, message=FALSE, warning=FALSE}
+
+SilkSamples = GlandSilk.metaData %>% filter(type == "gland")  
+protein.gland = GlandSilk %>% inner_join(SilkSamples) 
+
+protein.gland %>% filter(Percentage_of_Total_Spectra >0) %>%group_by(geneName) %>%
+  summarise(n = n()) %>%
+  filter(n ==3)
+
+protein.gland %>%
+  group_by(sample) %>%
+  summarise(totalFraction = sum(fractionMatches)) %>%
+  inner_join(protein.gland) %>%
+  mutate(percent = fractionMatches/totalFraction*100)->
+  protein.gland
+
+
+
+
+
+protein.gland %>%
+  group_by(geneName,type) %>% 
+  summarise(percent_mean = mean(percent), percent_sd = sd(percent)) %>%
+  arrange(-percent_mean) %>%
+  left_join(proteinInfo)  %>%
+  mutate(silkGroup = replace(silkGroup,is.na(silkGroup),"Not in silk") )->
+  protein.gland.summary 
+
+protein.gland.summary %>% 
+  select(geneName, percent_mean,gene_id,geneNameProtein,silkGroup)%>%
+  rename(percent = "percent_mean")->
+  protein.gland.summary.short
+
+write_csv(protein.gland.summary.short,"../../results/proteomics/major/proteinsInGland.unfiltered.2024.csv") 
+
+
+
+```
+
+### Figure 2A gland
+```{r Figure 2A gland, message=FALSE, warning=FALSE}
+
+
+
+protein.gland.summary %>% 
+  group_by(silkGroup) %>%
+  summarise(percent_mean = sum(percent_mean)) %>%
+  mutate(silkGroup = factor(silkGroup,levels = orderSilkGroup)) ->
+  protein.gland.summary.figure2
+
+protein.gland.summary.figure2 %>%
+  ggplot(aes(x = "Gland", y = percent_mean, fill = silkGroup)) +
+  geom_bar(, stat = "identity", position="fill" ) + 
+  theme_light()+
+  coord_polar("y", start=0) 
+
+ggsave("../../figures/figure2/2A.silk.pdf")
+
+
+```
+
+##Normalisation
+### Supp figure 16
+
+
+#### LFQ intensity
+```{r LFQ intensity, message=FALSE, warning=FALSE}
+
+
+read_tsv("../../data/proteomics/lfq.maxQuant.tsv") -> lfq.all
+
+lfq.all%>%
+  select(`Fasta headers`,
+         `iBAQ`,
+         `LFQ intensity 20211216_HF2_07_AR_Urmi_Native_Silk_HFIP_1`,
+         `LFQ intensity 20211216_HF2_07_AR_Urmi_Native_Silk_HFIP_2`,
+         `LFQ intensity 20211216_HF2_07_AR_Urmi_Native_Silk_HFIP_3`,
+         `Mol. weight [kDa]`) %>%
+  rename(FastaHeader = `Fasta headers`) %>%
+  rename(weight = `Mol. weight [kDa]`) %>%
+  rename(lfq1 = `LFQ intensity 20211216_HF2_07_AR_Urmi_Native_Silk_HFIP_1`) %>%
+  rename(lfq2 = `LFQ intensity 20211216_HF2_07_AR_Urmi_Native_Silk_HFIP_2`) %>%
+  rename(lfq3 = `LFQ intensity 20211216_HF2_07_AR_Urmi_Native_Silk_HFIP_3`) %>%
+  separate(FastaHeader, into = c("mRNA","gene","seq_id","type"), sep = " ") %>%
+  separate(gene,into= c("tag","gene_id"), sep = "=")  %>%
+  filter(!is.na(mRNA))  %>%
+  filter(!grepl(pattern = ";",mRNA)) %>%left_join(geneInfo)->
+  lfq.all
+
+
+
+  lfq.all%>%
+  select(mRNA,geneName,lfq1,lfq2,lfq3,weight)  %>%
+  mutate(geneName = replace(geneName,is.na(geneName),"MaSp3b")) ->
+  lfq.all
+
+lfq.all %>% distinct(geneName,weight) ->mw
+
+lfq.all %>% 
+  pivot_longer(cols = c("lfq1","lfq2","lfq3"), names_to = "sample", values_to = "lfq_int") ->
+  lfq.all
+
+
+lfq.all %>% inner_join(proteinInfo) %>%
+  group_by(geneNameProtein,Length) %>%
+  summarise(lfq_int = mean(lfq_int)) %>%
+  mutate(lfq_int_MW = sum(lfq_int* Length)) %>%
+  ungroup() %>%
+  mutate(totalMW = sum(lfq_int_MW)) %>%
+  mutate(percentMW = lfq_int_MW/ totalMW*100) ->
+  lfqInt_mw
+
+lfq.all %>%
+  group_by(geneName) %>%
+  summarise(lfq_int = mean(lfq_int)) %>%
+  ungroup() %>%
+  mutate(total = sum(lfq_int)) %>%
+  mutate(percent = lfq_int/ total*100) ->
+  lfq.all.summary
+
+
+lfq.all %>% inner_join(proteinInfo) %>%
+  group_by(geneNameProtein,Length) %>%
+  summarise(lfq_int = mean(lfq_int)) %>%
+  mutate(lfq_int_MW = sum(lfq_int* Length)) %>%
+  ungroup() %>%
+  mutate(totalMW = sum(lfq_int_MW)) %>%
+  mutate(percentMW = lfq_int_MW/ totalMW*100) ->
+ lfqInt_mw
+
+
+
+lfq.all %>% inner_join(proteinInfo) %>%
+  group_by(geneNameProtein,weight) %>%
+  summarise(lfq_int = mean(lfq_int)) %>%
+  ungroup() %>%
+  mutate(total = sum(lfq_int)) %>%
+  mutate(percent = (lfq_int/ total)*100) ->
+  lfqInt
+
+
+
+lfqInt_mw%>% inner_join(proteinInfo)%>%
+  mutate(silkGroup = factor(silkGroup,levels = orderSilkGroup)) %>% 
+  ggplot(aes(x = "Silk", y = percentMW, fill = silkGroup)) +
+  geom_bar(, stat = "identity", position="fill" ) + 
+  theme_light()+
+  coord_polar("y", start=0) ->plotMW.lfqInt
+
+
+lfqInt %>% inner_join(proteinInfo) %>%
+  group_by(silkGroup) %>%
+  summarise(sum(percent))
+
+lfqInt_mw %>% inner_join(proteinInfo) %>%
+  group_by(silkGroup) %>%
+  summarise(sum(percentMW))
+
+
+
+  
+```
+
+####iBAQ intensity
+```{r iBAQ intensity, message=FALSE, warning=FALSE}
+
+read_tsv("../../data/proteomics/ibaq.maxQuant.tsv") ->
+  ibaq.all
+
+
+
+ibaq.all%>%
+  select(`Fasta headers`,
+         `iBAQ`) %>%
+  rename(FastaHeader = `Fasta headers`) %>%
+  separate(FastaHeader, into = c("mRNA","gene","seq_id","type"), sep = " ") %>%
+  separate(gene,into= c("tag","gene_id"), sep = "=")  %>%
+  filter(!is.na(mRNA))  %>%
+  filter(!grepl(pattern = ";",mRNA)) %>%left_join(geneInfo)->
+  ibaq.all
+
+
+  ibaq.all%>%
+  select(mRNA,geneName,iBAQ)  %>%
+  mutate(geneName = replace(geneName,is.na(geneName),"MaSp3b")) ->
+  ibaq.all
+
+  
+ibaq.all %>%
+  filter(!is.na(iBAQ)) %>%
+  mutate(total = sum(iBAQ)) %>%
+  mutate(percent = iBAQ/ total*100) ->
+  iBAQ.all.summary
+  
+
+ibaq.all %>% inner_join(proteinInfo) %>%
+  group_by(geneNameProtein,Length) %>%
+  mutate(iBAQ_MW = sum(iBAQ* Length)) %>%
+  ungroup() %>%
+  mutate(totalMW = sum(iBAQ_MW)) %>%
+  mutate(percentMW = iBAQ_MW/ totalMW*100) ->
+  iBAQ_mw
+
+
+
+
+
+
+iBAQ_mw%>% inner_join(proteinInfo)%>%
+  mutate(silkGroup = factor(silkGroup,levels = orderSilkGroup)) %>% 
+  ggplot(aes(x = "Silk", y = percentMW, fill = silkGroup)) +
+  geom_bar(, stat = "identity", position="fill" ) + 
+  theme_light()+
+  coord_polar("y", start=0) ->plotMW.iBAQ
+
+
+
+iBAQ_mw %>% inner_join(proteinInfo) %>%
+  group_by(silkGroup) %>%
+  summarise(sum(percentMW))
+
+
+
+  
+```
+
+
+
+
+
+#### NSAF values
+```{r NSAF values, message=FALSE, warning=FALSE}
+
+## Load emPAI values
+
+data = read_tsv("../../data/proteomics/majorSilk/Normalisation_NSAF.txt", col_names = colNames_GlandSilk) %>% rename(tx_name = "geneName") 
+
+ 
+ data %>%  
+   pivot_longer(values_to = "cell", names_to = "sample", cols =-tx_name) %>%
+   mutate(cell = gsub(pattern = "\\\xca%",replacement = "",cell)) %>%
+   separate(cell, into=c("percent","NSAF"), sep = "<") %>%
+   mutate(NSAF = gsub(pattern = "\\(",replacement = "",NSAF)) %>%
+   mutate(NSAF = gsub(pattern = "\\)",replacement = "",NSAF)) %>%
+   mutate(NSAF = gsub(pattern = ",",replacement = ".",NSAF)) %>%
+   mutate(NSAF = as.numeric(NSAF)) %>%
+   inner_join(geneInfo.transcript) %>%
+   select(tx_name,geneName, sample, NSAF ) ->
+   data.old
+ 
+ data.old %>% filter(is.na(geneName))
+ 
+ data %>%  
+   pivot_longer(values_to = "cell", names_to = "sample", cols =-tx_name) %>%
+   mutate(cell = gsub(pattern = "\\\xca%",replacement = "",cell)) %>%
+   separate(cell, into=c("percent","NSAF"), sep = "<") %>%
+   mutate(NSAF = gsub(pattern = "\\(",replacement = "",NSAF)) %>%
+   mutate(NSAF = gsub(pattern = "\\)",replacement = "",NSAF)) %>%
+   mutate(NSAF = gsub(pattern = ",",replacement = ".",NSAF)) %>%
+   mutate(NSAF = as.numeric(NSAF)) %>%
+   rename(geneName = tx_name) %>%
+   inner_join(geneInfo.transcript) %>%
+   select(tx_name,geneName, sample, NSAF ) ->
+   data.new
+ 
+ 
+  bind_rows(data.old,data.new) ->
+   NASF.data
+ 
+ SilkSamples = GlandSilk.metaData %>% filter(type == "silk")
+ 
+ NASF.data %>% inner_join(SilkSamples) %>%
+   inner_join(mw) %>%
+   mutate(NSAFMW = weight*NSAF) %>%
+    group_by(geneName,type,solution) %>%
+  summarise( NSAFMW = mean(NSAFMW), NSAF = mean(NSAF)) %>%
+  inner_join(proteinInfo) ->
+  protein.silk.NSAF
+
+  NASF.data %>% inner_join(SilkSamples) %>%
+    filter(solution == "HFIP") %>%
+  group_by(geneName,type,solution) %>%
+  summarise( NSAF = mean(NSAF)) %>%
+  ungroup() %>%  
+  mutate(total = sum(NSAF)) %>%
+  mutate(percent = NSAF/ total*100) ->
+  protein.silk.NSAF.HFIP
+
+  
+
+protein.silk.NSAF %>%
+    filter(solution == "HFIP")  %>%
+    mutate(geneNameProtein = factor(geneNameProtein, levels = geneOrder2))%>%
+    mutate(silkGroup = factor(silkGroup,levels = orderSilkGroup)) %>% 
+    ggplot( aes(x = "silk", y = NSAFMW, fill = silkGroup)) +
+    geom_bar(, stat = "identity", position="fill" ) + 
+  theme_light()+ 
+  coord_polar("y", start=0) ->
+    plotMW.NSAF.MW 
+
+
+
+protein.silk.NSAF %>%
+  mutate(geneNameProtein = factor(geneNameProtein, levels = geneOrder2))%>%
+  mutate(silkGroup = factor(silkGroup,levels = orderSilkGroup)) %>% 
+  ggplot( aes(x = "silk", y = NSAF, fill = silkGroup)) +
+  geom_bar(, stat = "identity", position="fill" ) + 
+  theme_light()+ 
+  coord_polar("y", start=0) + 
+  facet_grid(solution~method) ->
+  weightComparison
+
+
+  
+  
+  protein.silk.NSAF %>%
+  mutate(geneNameProtein = factor(geneNameProtein, levels = geneOrder2))%>%
+  mutate(silkGroup = factor(silkGroup,levels = orderSilkGroup)) %>% 
+  ggplot( aes(x = "silk", y = fraction, fill = silkGroup)) +
+  geom_bar(, stat = "identity", position="fill" ) + 
+  theme_light()+ 
+  coord_polar("y", start=0)  +
+    facet_grid(.~solution)->
+    plotMW.fraction.all.MW 
+
+
+  
+    
+    
+```
+
+#### Visualise supp figure 16
+```{r supp figure 16, message=FALSE, warning=FALSE}
+
+
+plotMW.iBAQ = plotMW.iBAQ+ylab("iBAQ") + xlab("")
+plotMW.lfqInt = plotMW.lfqInt+ylab("LFQ intensity") + xlab("")
+plot.Spectra = plot.Spectra+ylab("Total spectra")+ xlab("")
+plotMW.NSAF.MW = plotMW.NSAF.MW+ylab("NSAF") + xlab("")
+plot.Spectra + plotMW.iBAQ + plotMW.NSAF.MW  + plotMW.lfqInt +
+  plot_layout(guides = "collect")
+ggsave("../../supplementaryFigures/SuppFig16/SuppFig16.pdf")
+
+
+
+
+```
+
+
+#### Supp table 12 
+```{r, message=FALSE, warning=FALSE}
+
+protein.gland %>%
+  filter(Percentage_of_Total_Spectra > 0) %>%
+  group_by(geneName) %>%
+  summarise(n = n(),PTS_mean = sum(Percentage_of_Total_Spectra)/3)%>%
+  mutate(total = sum(PTS_mean)) %>%
+  mutate(percent = PTS_mean/total*100) %>%
+  arrange(-percent) %>%
+  mutate(rank = 1:length(percent))->
+  glandInfo.table12
+  
+glandInfo.table12 %>% select(geneName,n,percent, rank)  %>%
+  rename(n_gland = "n") %>%
+  rename(percent_gland = "percent") %>%
+  rename(rank_gland = "rank")->
+  glandInfo.table12
+
+
+protein.silk = GlandSilk %>% inner_join(SilkSamples) 
+
+protein.silk %>%   
+  filter(Percentage_of_Total_Spectra > 0) %>%
+  group_by(solution,geneName) %>%
+  summarise(n = n(),PTS_mean = sum(Percentage_of_Total_Spectra)/3) ->
+  protein.silk.summary.table12
+protein.silk.summary.table12 %>%
+  group_by(solution) %>%
+  summarise(total = sum(PTS_mean)) %>%
+  inner_join(protein.silk.summary.table12) %>%
+  mutate(percent = PTS_mean/total*100) ->
+  protein.silk.summary.table12
+
+protein.silk.summary.table12 %>% arrange(-percent) %>%
+  group_by(geneName) %>%
+  summarise(percent = sum(percent) / 3)%>% arrange(-percent) %>%
+  mutate(rank = 1:length(geneName)) -> silkInfo.table12
+protein.silk %>%
+  group_by(geneName) %>%
+  summarise(n = n()) %>%
+  inner_join(silkInfo.table12)  
+
+
+protein.silk %>%
+  group_by(geneName) %>%
+  summarise(n = n()) %>%
+  inner_join(silkInfo.table12) ->
+  silkInfo.table12
+
+
+
+
+
+
+silkInfo.table12 %>% select(geneName,n,percent, rank)  %>%
+  rename(n_silk = "n") %>%
+  rename(percent_silk = "percent") %>%
+  rename(rank_silk = "rank")->
+  silkInfo.table12
+
+lfq.all.summary %>% select(geneName,percent) %>% rename(LFQ_int = "percent") -> lfq.all.summary
+iBAQ.all.summary%>% select(geneName,percent) %>% rename(iBAQ = "percent")-> iBAQ.all.summary
+protein.silk.NSAF.HFIP %>% select(geneName,percent) %>% filter(percent >0)%>% rename(NSAF = "percent") ->protein.silk.NSAF.HFIP
+
+
+sum(iBAQ.all.summary$percent) 
+proteinInfo %>% select(geneNameProtein,geneName) -> PI.names 
+left_join(glandInfo.table12,silkInfo.table12)  %>%
+  left_join(protein.silk.NSAF) %>%
+  left_join(lfq.all.summary) %>%
+  left_join(iBAQ.all.summary) %>%
+  left_join(PI.names) ->
+  table12
+
+write_csv(table12, file = "../../supplementaryTables/suppTable12.csv")
+```
+
+
+## Amino acid composition 
+
+```{r Amino acid composition , message=FALSE, warning=FALSE}
+merged_df <- read.csv("../../annotation/proteomics/proteinComposition.csv") %>%
+  mutate(tx_name = Protein.ID) %>%
+  inner_join(transcriptInfo) %>% 
+  inner_join(proteinInfo) %>%
+  select(gene_id,geneNameProtein, silkGroup, Length, Molecular.Weight..MW., Isoelectric.Point..pI.,  aromaticity, gravy..Grand.Average.of.Hydropathy., Amino.Acid.Percentages)
+
+# Extract amino acid percentages
+extract_percentages <- function(aa_percent) {
+  aa_percent <- gsub("[{}']", "", aa_percent)
+  aa_split <- strsplit(aa_percent, ", ")[[1]]
+  amino_acids <- sapply(strsplit(aa_split, ": "), `[`, 1)
+  percentages <- sapply(strsplit(aa_split, ": "), `[`, 2)
+  setNames(as.numeric(percentages), amino_acids)
+}
+# Create new columns for each amino acid
+amino_acids <- c("A", "R", "N", "D", "C", "Q", "E", "G", "H", "I", "L", "K", "M", "F", "P", "S", "T", "W", "Y", "V")
+  for (aa in amino_acids) {
+  merged_df[[aa]] <- 0
+}
+# Fill in the values for each amino acid column
+for (i in 1:nrow(merged_df)) {
+  aa_percent <- extract_percentages(merged_df$Amino.Acid.Percentages[i])
+  merged_df[i, names(aa_percent)] <- unlist(aa_percent)
+}
+# Print the modified data frame
+print(merged_df)
+# Reshape the data from wide to long format
+df_long <- tidyr::pivot_longer(merged_df, cols = -(1:9), names_to = "Amino_Acid", values_to = "Percentage")
+
+
+df_long %>% inner_join(proteinInfo) -> df_long
+
+merged_df %>% inner_join(proteinInfo)->merged_df 
+
+```
+### Plots
+### Supp Figure 17
+```{r, message=FALSE, warning=FALSE}
+
+order = c("SpiCE-LMa1","SpiCE-LMa4",
+          "MaSp3a","MaSp3b","SpiCE-LMa2", "AmSp-like1","AmSp-like2",
+         "MaSp1c",
+          "SpiCE-LMa5","MaSp2b","SpiCE-LMa3","MaSp4",
+         "MaSp1b","MaSp1a","SpiCE-LMa6",
+         "MaSp2c","MaSp2e","MaSp2f")
+
+df_long %>% 
+  mutate(geneNameProtein = factor(geneNameProtein, rev(order))) %>%
+  arrange(geneNameProtein)->
+  df_long
+merged_df %>% 
+  mutate(geneNameProtein = factor(geneNameProtein, rev(order))) %>%
+  arrange(geneNameProtein)->
+  merged_df
+
+colors <- c( "#0000FF", "#00FF00", "#FF00FF", "#FFFF00", "#FF8000",
+               "#00FFFF", "#8000FF", "#FF0000", "#9F1480","#00FF99", "#000080",
+               "#FF6500",  "#896903", "#7FFF00", "#FF69B4",
+               "#32CD32", "#FFD711", "#8A2BE2", "#E6E6F0", "#00BFFF")
+# Plot the grouped bar plot
+ggplot(df_long, aes(x = geneNameProtein, y = Percentage, fill = Amino_Acid)) +
+  geom_bar(stat = "identity", position = "dodge") +
+   scale_fill_manual(values = colors) + 
+  labs(x = "Protein.ID", y = "Percentage") +
+  ggtitle("Amino Acid Percentages for Proteins") +
+  theme_minimal()
+# Plot the stacked bar plot
+
+aa_plot <- ggplot(df_long, aes(x = geneNameProtein, y = Percentage, fill = Amino_Acid)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = colors) +
+  labs(x = "Protein", y = "Amino acid composition (%)") +
+  guides(x =  guide_axis(angle = 45)) +
+  theme_minimal() +
+  scale_x_discrete(labels = function(x) paste0(x, " (", merged_df$Length, " aa) "))
+
+ggsave("../../supplementaryFigures/SuppFig17/SuppFig17.aa_percent_barplot.length.pdf", plot = aa_plot)
+```
+### Figure 2E
+```{r, message=FALSE, warning=FALSE}
+# Define colors for each amino acid category
+category_colors <- c(
+  aromatic_cysteine = "#1177b4",       # blue
+  small_nonpolar = "#ff7f0e",    # orange
+  hydrophobic = "#2ca02c",          # green
+  polar = "#d62728"  # red
+)
+# Create a named vector to map amino acids to categories
+amino_acid_to_category <- c(
+  A = "small_nonpolar", P = "small_nonpolar", G = "small_nonpolar", S = "small_nonpolar", T = "small_nonpolar", 
+  V = "hydrophobic", I = "hydrophobic", L = "hydrophobic", M = "hydrophobic", 
+  H = "polar", R = "polar", K = "polar", D = "polar", E = "polar", N = "polar", Q = "polar", 
+  F = "aromatic_cysteine", Y = "aromatic_cysteine", W = "aromatic_cysteine", C = "aromatic_cysteine"
+)
+# Map amino acids to categories
+df_long$category <- amino_acid_to_category[df_long$Amino_Acid]
+
+
+# Plot the stacked bar plot with colored amino acid categories
+plot1 <- ggplot(df_long, aes(x = geneNameProtein, y = Percentage, fill = category)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Protein", y = "Percentage", fill = "Amino Acid Category") +
+  ggtitle("Amino Acid Percentages by Category") +
+  scale_fill_manual(values = category_colors) +  # Use the defined colors
+  guides(x =  guide_axis(angle = 45)) +
+  theme_minimal() #+
+  theme(legend.position = "bottom")  # Adjust legend position
+plot2 <- aa_plot + plot1
+
+
+plot1+coord_flip() 
+ggsave("../../figures/figure2/figure2.aa.composition.pdf",  width = 30, height = 20, units = "cm")
+
+
+
+```
+
+
+
+
+
+# RNA analysis
+## QC
+```{r, message=FALSE, warning=FALSE}
+
+
+sampleInfo.QC.merged = read_csv(file = "../../data/bulkRNA/sampleInfo.QC.merged")
+
+bulk.data.merged = read_csv(file = "../../data/bulkRNA/All.samples.count.csv") %>%
+  rename(gene_id = "Geneid")
+
+geneInfo = getGeneInfoFull(repositoryPath = repositoryPath) %>% select(gene_id,geneName,product)
+
+bulk.data.merged.QC = bulk.data.merged[,c("gene_id",sampleInfo.QC.merged$sample)]
+      
+```
+
+### Gene QC filter
+
+```{r, message=FALSE, warning=FALSE}
+
+bulk.data.merged.QC %>% 
+  pivot_longer(cols = -gene_id, names_to = "sample",values_to = "count") %>%
+  group_by(sample) %>%
+  dplyr::summarise(sampleReads = sum(count)) ->
+  sample.count.info
+
+
+
+
+transcriptInfo %>% group_by(gene_id) %>%
+  summarise(length = max(tx_len)) -> geneInfo.length
+
+bulk.data.merged.QC %>% 
+  pivot_longer(cols = -gene_id, names_to = "sample",values_to = "count") %>%
+  inner_join(geneInfo.length) %>%
+  mutate(normLengthCount = count/ length)->
+  bulk.data.merged.QC.tpm
+
+
+bulk.data.merged.QC.tpm %>%  
+  group_by(sample) %>%
+  dplyr::summarise(sampleReads = sum(normLengthCount)) %>%
+  inner_join(bulk.data.merged.QC.tpm) %>%
+  mutate(tpm= (normLengthCount/sampleReads*1000000)) ->
+  bulk.data.merged.QC.tpm
+
+
+
+
+bulk.data.merged.QC.tpm %>% select(gene_id,sample,length,count,tpm) -> bulk.data.merged.QC.tpm
+
+
+
+bulk.data.merged.QC.tpm %>%
+  group_by(gene_id) %>% 
+  summarise(max_tpm = max(tpm)) %>%
+  inner_join(geneInfo) %>%
+  left_join(proteinInfo) %>%
+  mutate(Group = replace(silkGroup, is.na(silkGroup), "Other")) ->  bulk.data.merged.QC.tpm.summary
+
+
+bulk.data.merged.QC.tpm.summary %>%ggplot(aes(log10(max_tpm ))) + geom_density()
+
+
+bulk.data.merged.QC.tpm.summary %>%
+  select(gene_id,max_tpm) -> 
+  geneInfo.tpm
+
+
+geneInfo.tpm %>% filter(max_tpm > 4) ->
+geneInfo.QC
+
+
+bulk.data.merged.QC %>% pivot_longer(-gene_id, values_to = "readCount", names_to = "sample") -> bulk.data.merged.QC.long
+  
+
+
+getGeneInfoFull(repositoryPath = repositoryPath) %>% select(gene_id,geneName,lascID) -> geneNames.all
+bulk.data.merged.QC.tpm %>% 
+  inner_join(sampleInfo.QC.merged) %>%
+  filter(Tissue == c("Major") | MAG == c("Part")) %>%
+  group_by(gene_id,Tissue, MAG) %>%
+  summarise(tpm = mean(tpm)) %>% 
+  select(-MAG) %>%
+  pivot_wider(names_from = "Tissue" , values_from = "tpm") -> 
+  bulk.data.merged.QC.tpm.major.wide
+
+
+
+
+```
+
+
+
+## PLS/PCA/DEseq2 part analysis on glands
+
+```{r, message=FALSE, warning=FALSE}
+PCAvariance = list()
+
+
+```
+
+### Head vs Body
+
+```{r Head vs Body, message=FALSE, warning=FALSE}
+
+
+
+sampleInfo.QC.merged %>%
+  filter(part %in%  c("Head","WholeBody")) ->
+  sampleInfo.QC.merged.parts
+
+# geneInfo
+geneInfo.parts = geneInfo.QC
+
+
+
+normExpression.parts = getVSTexpression(count.df = bulk.data.merged.QC.long,
+                 md =sampleInfo.QC.merged.parts,
+                 gi =geneInfo.parts, 
+                 design =  "part" )
+```
+
+#### PLS-DA
+```{r, message=FALSE, warning=FALSE }
+
+OPLS.parts = getOPLS(normExpression = normExpression.parts,
+                 md =sampleInfo.QC.merged.parts,
+                 gi =geneInfo.parts, 
+                 design =  "part"
+          )
+
+
+
+sampleInfo.parts.PLS = getMetaDataFromOPLS(OPLS =  OPLS.parts, 
+                                           md = sampleInfo.QC.merged.parts,
+                                           extension =  "part" ) %>%
+  rename(Body_vs_Head_PLS1 = "part_p1")
+
+
+geneInfo.parts.PLS = getGeneInfoFromOPLS(OPLS =  OPLS.parts, 
+                    md = sampleInfo.QC.merged.parts,
+                    extension =  "part",gi = geneInfo.parts )%>%
+  rename(Body_vs_Head_PLS1 = "part_p1") %>%  
+  select(gene_id,  Body_vs_Head_PLS1) 
+
+
+
+```
+
+#### PCA
+
+```{r, message=FALSE, warning=FALSE }
+
+mir.pca <- prcomp(t(normExpression.parts), center = TRUE, scale = FALSE) 
+e.var = (mir.pca[['sdev']]^2 / sum(mir.pca[['sdev']]^2))
+e.var = as.data.frame( e.var )
+e.var$PC = as.factor(1:nrow(e.var)) 
+e.var$Variance = e.var$e.var*100
+e.var$CumulativeVariance = cumsum(e.var$Variance)
+qplot(PC, Variance, data=e.var, geom = c("point")
+      , ylim = c(0,max(e.var$Variance)+5) 
+      ,ylab = "Variance (%)")
+
+PCAvariance[["part"]] = e.var
+pctable = as.data.frame(mir.pca$x)[, 1:4]
+set.seed(111)
+
+mir.pca$x %>% as.data.frame()%>% 
+  rownames_to_column(var = "sample") %>%
+  select(sample,PC1) %>% rename(Body_vs_Head_PC1 = "PC1") ->
+  sampleInfo.parts.PCA
+
+mir.pca$rotation %>% as.data.frame() %>% rownames_to_column(var = "gene_id") %>%
+  select(gene_id,PC1) %>% rename(Body_vs_Head_PC1 = "PC1") ->
+  geneInfo.parts.PCA
+
+```
+#### DEseq2
+```{r, message=FALSE, warning=FALSE }
+
+
+Tissue.deseq = getDEseq2Object(count.df = bulk.data.merged.QC.long,
+                 md =sampleInfo.QC.merged.parts,
+                 gi =geneInfo.parts, 
+                 design =  "part" )
+
+
+Tissue.deseq.DE = DESeq(Tissue.deseq)
+
+as.data.frame(results(Tissue.deseq.DE)) %>%
+  rownames_to_column(var = "gene_id") %>%
+  rename(Body_vs_Head_FC = "log2FoldChange") %>%
+  rename(Body_vs_Head_padj =  "padj") %>%
+  select(gene_id,Body_vs_Head_FC,Body_vs_Head_padj) -> geneInfo.parts.DEseq2
+
+
+```
+
+
+
+### Major analysis
+```{r, message=FALSE, warning=FALSE}
+
+sampleInfo.QC.merged %>%
+  filter(Tissue %in% c("Major","WholeBody")) ->
+  sampleInfo.QC.merged.major
+
+# geneInfo
+geneInfo.major = geneInfo.parts.PCA %>% filter(Body_vs_Head_PC1 >0)
+
+```
+#### PLS-DA
+
+```{r , message=FALSE, warning=FALSE}
+
+normExpression.major = getVSTexpression(count.df = bulk.data.merged.QC.long,
+                 md =sampleInfo.QC.merged.major,
+                 gi =geneInfo.major, 
+                 design =  "Tissue" )
+
+OPLS.major = getOPLS(normExpression = normExpression.major,
+                     nrOfOrtho = 1,
+                     nrOfPredictive =1,
+                     md =sampleInfo.QC.merged.major,
+                     gi =geneInfo.major, 
+                     design =  "Tissue")
+
+
+
+sampleInfo.major.PLS = getMetaDataFromOPLS(OPLS =  OPLS.major, 
+                    md = sampleInfo.QC.merged.major,
+                    extension =  "Major" ) %>%
+  select(sample,Tissue,Major_p1) %>% rename(Major_vs_Body_PLS1 = "Major_p1")
+
+  
+
+geneInfo.major.PLS = getGeneInfoFromOPLS(OPLS =  OPLS.major, 
+                    md = sampleInfo.QC.merged.major,
+                    gi = geneInfo.major,
+                    extension =  "Major" ) %>%
+  select(gene_id,  Major_p1) %>% rename(Major_vs_Body_PLS1 = "Major_p1")
+
+
+
+
+
+
+```
+
+
+#### PCA
+
+```{r , message=FALSE, warning=FALSE}
+
+
+
+mir.pca <- prcomp(t(normExpression.major), center = TRUE, scale = FALSE) 
+e.var = (mir.pca[['sdev']]^2 / sum(mir.pca[['sdev']]^2))
+e.var = as.data.frame( e.var )
+e.var$PC = as.factor(1:nrow(e.var)) 
+e.var$Variance = e.var$e.var*100
+e.var$CumulativeVariance = cumsum(e.var$Variance)
+qplot(PC, Variance, data=e.var, geom = c("point")
+      , ylim = c(0,max(e.var$Variance)+5) 
+      ,ylab = "Variance (%)")
+
+PCAvariance[["Major"]] = e.var
+
+
+mir.pca$x %>% as.data.frame()%>% 
+  rownames_to_column(var = "sample") %>%
+  select(sample,PC1) %>% rename(Major_vs_Body_PC1 = "PC1") ->
+  sampleInfo.major.PCA
+
+
+
+mir.pca$rotation %>% as.data.frame() %>% rownames_to_column(var = "gene_id") %>%
+  select(gene_id,PC1) %>% rename(Major_vs_Body_PC1 = "PC1") ->
+  geneInfo.major.PCA
+
+```
+
+
+#### DEseq2
+
+```{r , message=FALSE, warning=FALSE}
+
+
+Major.deseq = getDEseq2Object(count.df = bulk.data.merged.QC.long,
+                 md =sampleInfo.QC.merged.major,
+                 gi =geneInfo.major, 
+                 design =  "Tissue" )
+
+
+
+
+
+Major.deseq.DE = DESeq(Major.deseq)
+
+as.data.frame(results(Major.deseq.DE)) %>%
+  rownames_to_column(var = "gene_id") %>%
+  rename(Major_vs_Body_FC = "log2FoldChange") %>%
+  rename(Major_vs_Body_padj =  "padj") %>%
+  select(gene_id,Major_vs_Body_FC,Major_vs_Body_padj) -> geneInfo.major.DEseq2
+
+```
+
+
+### Ampullate vs other glands analysis
+```{r , message=FALSE, warning=FALSE}
+
+sampleInfo.QC.merged %>%
+  filter(Tissue  %in% c("AciniPyri","Aggregate","Flagelliform","Major","Minor"))  %>%
+  mutate(GlandType = "Ampullate") %>%
+  mutate(GlandType = replace(GlandType,Tissue =="AciniPyri", "OtherGland")) %>%
+  mutate(GlandType = replace(GlandType,Tissue =="Aggregate", "OtherGland")) %>%
+  mutate(GlandType = replace(GlandType,Tissue =="Flagelliform", "OtherGland")) %>%
+  select(sample, sample2,GlandType)->
+  sampleInfo.QC.merged.glands
+
+
+# geneInfo
+geneInfo.glands = geneInfo.parts.PCA %>% filter(Body_vs_Head_PC1 >0)
+
+```
+
+#### PLS-DA
+
+```{r, message=FALSE, warning=FALSE } 
+normExpression.ampullate = getVSTexpression(count.df = bulk.data.merged.QC.long,
+                 md =sampleInfo.QC.merged.glands,
+                 gi =geneInfo.glands, 
+                 design =  "GlandType" )
+
+PLS.gland = getOPLS(normExpression = normExpression.ampullate,
+                     md =sampleInfo.QC.merged.glands,
+                     gi =geneInfo.glands, 
+                     design =  "GlandType")
+
+
+sampleInfo.ampullate.PLS = getMetaDataFromOPLS(OPLS =  PLS.gland, 
+                    md = sampleInfo.QC.merged.glands,
+                    extension =  "GlandType" ) %>%
+  rename(Ampullate_vs_Rest_PLS1 = "GlandType_p1")
+  
+
+geneInfo.ampullate.PLS = getGeneInfoFromOPLS(OPLS =  PLS.gland, 
+                    md = sampleInfo.QC.merged.glands,
+                    gi = geneInfo.glands,
+                    extension =  "GlandType", design =  "GlandType") %>%
+  rename(Ampullate_vs_Rest_PLS1 = "GlandType_p1")  %>%
+  select(gene_id, Ampullate_vs_Rest_PLS1)
+
+
+```
+
+#### PCA
+
+```{r , message=FALSE, warning=FALSE}
+
+
+
+mir.pca <- prcomp(t(normExpression.ampullate), center = TRUE, scale = FALSE) 
+e.var = (mir.pca[['sdev']]^2 / sum(mir.pca[['sdev']]^2))
+e.var = as.data.frame( e.var )
+e.var$PC = as.factor(1:nrow(e.var)) 
+e.var$Variance = e.var$e.var*100
+e.var$CumulativeVariance = cumsum(e.var$Variance)
+qplot(PC, Variance, data=e.var, geom = c("point")
+      , ylim = c(0,max(e.var$Variance)+5) 
+      ,ylab = "Variance (%)")
+
+PCAvariance[["Ampullate"]] = e.var
+
+
+mir.pca$x %>% as.data.frame()%>% 
+  rownames_to_column(var = "sample") %>%
+  select(sample,PC1) %>% 
+  rename(Ampullate_vs_Rest_PC1 = "PC1") ->
+  sampleInfo.ampullate.PCA
+
+
+mir.pca$rotation %>%
+  as.data.frame() %>% 
+   rownames_to_column(var = "gene_id") %>%
+  select(gene_id,PC1) %>% rename(Ampullate_vs_Rest_PC1 = "PC1") ->
+  geneInfo.ampullate.PCA
+
+```
+
+#### DEseq2
+
+```{r , message=FALSE, warning=FALSE}
+
+Ampullate.deseq = getDEseq2Object(count.df = bulk.data.merged.QC.long,
+                 md =sampleInfo.QC.merged.glands,
+                 gi =geneInfo.glands, 
+                 design =  "GlandType" )
+
+
+Ampullate.deseq.DE = DESeq(Ampullate.deseq)
+
+as.data.frame(results(Ampullate.deseq.DE)) %>%
+  rownames_to_column(var = "gene_id") %>%
+  rename(Ampullate_vs_Rest_FC = "log2FoldChange") %>%
+  rename(Ampullate_vs_Rest_padj =  "padj") %>%
+  select(gene_id,Ampullate_vs_Rest_FC,Ampullate_vs_Rest_padj) -> geneInfo.ampullate.DEseq2
+
+
+```
+
+
+### Major part analysis
+```{r, message=FALSE, warning=FALSE}
+sampleInfo.QC.merged %>%
+  filter(Tissue %in% c("Tail","Sac","Duct")) ->
+  sampleInfo.QC.merged.major.parts
+
+
+geneInfo.major.parts.1 =geneInfo.major.PCA %>% filter(Major_vs_Body_PC1 < 0)
+
+geneInfo.major.parts.2 = geneInfo.major.PCA %>% inner_join(proteinInfo) %>% select(gene_id,Major_vs_Body_PC1) 
+
+geneInfo.major.parts = full_join(geneInfo.major.parts.1,geneInfo.major.parts.2)
+
+normExpression.major.parts = getVSTexpression(count.df = bulk.data.merged.QC.long,
+                 md =sampleInfo.QC.merged.major.parts,
+                 gi =geneInfo.major.parts, 
+                 design =  "Tissue" )
+
+
+
+
+
+```
+
+
+#### PLS-DA
+```{r , message=FALSE, warning=FALSE}
+
+PLS.major.parts = getPLS(normExpression = normExpression.major.parts,
+                     md =sampleInfo.QC.merged.major.parts,
+                     gi =geneInfo.major.parts, 
+                     design =  "Tissue")
+
+
+sampleInfo.major.parts.PLS = getMetaDataFromOPLS(OPLS =  PLS.major.parts, 
+                    md = sampleInfo.QC.merged.major.parts,
+                    extension =  "MAG_part" ) %>%
+  select(sample,Tissue,MAG_part_p1,MAG_part_p2)
+  
+
+geneInfo.MAGpart.PLS = getGeneInfoFrom2DPLS(OPLS =  PLS.major.parts, 
+                    md = sampleInfo.QC.merged.major.parts,
+                    gi = geneInfo.major.parts,
+                    extension =  "MAG_part" ) %>% 
+  mutate(MAG_part_Distance_PLS = (MAG_part_p1^2+MAG_part_p2^2)^0.5)
+
+
+
+
+
+geneInfo.MAGpart.PLS  %>%
+  mutate(MajorParts_PLS = "Undefined") %>% 
+  mutate(MajorParts_PLS = replace(MajorParts_PLS,
+                              MAG_part_Distance_PLS > 0.01 & MAG_part_p1 < 0 ,
+                              "Tail")) %>%
+  mutate(MajorParts_PLS = replace(MajorParts_PLS,
+                              MAG_part_Distance_PLS > 0.01 &
+                                MAG_part_p1 > 0 &
+                                MAG_part_p2 <= -0.005 ,"Sac")) %>%
+  mutate(MajorParts_PLS = replace(MajorParts_PLS,
+                                  MAG_part_Distance_PLS > 0.01 &
+                                MAG_part_p1 > 0 &
+                                MAG_part_p2 >= 0.005 ,"Duct")) %>%
+  select(gene_id,MAG_part_p1,MAG_part_p2,MAG_part_Distance_PLS,MajorParts_PLS) -> 
+  geneInfo.major.parts.PLS
+
+geneInfo.major.parts.PLS %>% inner_join(proteinInfo) %>% group_by(MajorParts_PLS) %>% summarise(n = n())  
+  
+
+
+```
+
+#### PCA
+
+
+```{r, message=FALSE, warning=FALSE }
+
+
+
+mir.pca <- prcomp(t(normExpression.major.parts), center = TRUE, scale = FALSE) 
+e.var = (mir.pca[['sdev']]^2 / sum(mir.pca[['sdev']]^2))
+e.var = as.data.frame( e.var )
+e.var$PC = as.factor(1:nrow(e.var)) 
+e.var$Variance = e.var$e.var*100
+e.var$CumulativeVariance = cumsum(e.var$Variance)
+qplot(PC, Variance, data=e.var, geom = c("point")
+      , ylim = c(0,max(e.var$Variance)+5) 
+      ,ylab = "Variance (%)")
+
+PCAvariance[["major.part"]] = e.var
+
+
+mir.pca$x %>% as.data.frame()%>% 
+  rownames_to_column(var = "sample") %>%
+  select(sample,PC1,PC2) %>% 
+  rename(Major_part_PC1 = "PC1")%>% 
+  rename(Major_part_PC2 = "PC2")->
+  sampleInfo.major.parts.PCA
+
+
+  
+
+
+mir.pca$rotation %>%
+  as.data.frame() %>% 
+   rownames_to_column(var = "gene_id") %>%
+  select(gene_id,PC1,PC2) %>% rename(Major_part_PC1 = "PC1",Major_part_PC2 = "PC2") ->
+  geneInfo.major.parts.PCA
+
+
+
+geneInfo.major.parts.PCA  %>%
+  mutate(MAG_part_Distance_PCA = (Major_part_PC1^2+Major_part_PC2^2)^0.5) %>%
+mutate(MajorParts_PCA = "Undefined") %>% 
+  mutate(MajorParts_PCA = replace(MajorParts_PCA,
+                              (MAG_part_Distance_PCA > 0.013 &
+                                Major_part_PC1 < 0 &
+                                 Major_part_PC2 > 0),
+                              "Tail")) %>%
+  mutate(MajorParts_PCA = replace(MajorParts_PCA,
+                              (MAG_part_Distance_PCA > 0.013 &
+                                Major_part_PC1 > 0 &
+                                 Major_part_PC2 > 0) ,"Sac")) %>%
+  mutate(MajorParts_PCA = replace(MajorParts_PCA,
+                              (MAG_part_Distance_PCA > 0.013 &
+                                 Major_part_PC2 < 0) ,"Duct")) %>%
+  select(gene_id,Major_part_PC1,Major_part_PC2,MAG_part_Distance_PCA,MajorParts_PCA) -> 
+  geneInfo.major.parts.PCA
+
+
+
+
+geneInfo.major.parts.PCA %>% inner_join(proteinInfo) %>% group_by(MajorParts_PCA) %>% summarise(n = n())  
+  
+
+
+```
+
+
+#### DEseq2
+
+```{r , message=FALSE, warning=FALSE}
+
+
+sampleInfo.QC.merged %>%
+  mutate(sac = "Sac") %>%
+  mutate(sac = replace(sac,Tissue != "Sac", "Other" )) %>%
+  mutate(sac = factor(sac, levels = c( "Other","Sac" ))) %>%
+  mutate(tail = "Tail") %>%
+  mutate(tail = replace(tail,Tissue != "Tail", "Other" )) %>%
+  mutate(tail = factor(tail, levels = c("Other","Tail" ))) %>%
+  mutate(duct = "Duct") %>%
+  mutate(duct = replace(duct,Tissue != "Duct", "Other" )) %>%
+  mutate(duct = factor(duct, levels = c( "Other","Duct" ))) %>%
+  filter(Tissue %in% c("Sac","Duct","Tail")) ->
+  sampleInfo.QC.merged.major.parts
+
+dds.sac = getDEseq2Object(count.df = bulk.data.merged.QC.long,
+                 md =sampleInfo.QC.merged.major.parts,
+                 gi =geneInfo.major.parts, 
+                 design =  "sac" )
+
+dds.sac  = DESeq(dds.sac)
+as.data.frame(results(dds.sac)) %>%
+  rownames_to_column(var = "gene_id") %>%
+  rename(Sac_vs_Rest_FC = "log2FoldChange") %>%
+  rename(Sac_vs_Rest_padj =  "padj") %>%
+  select(gene_id,Sac_vs_Rest_FC,Sac_vs_Rest_padj) ->  
+  geneInfo.sac.DEseq2
+
+
+dds.tail = getDEseq2Object(count.df = bulk.data.merged.QC.long,
+                 md =sampleInfo.QC.merged.major.parts,
+                 gi =geneInfo.major.parts, 
+                 design =  "tail" )
+dds.tail  = DESeq(dds.tail)
+as.data.frame(results(dds.tail)) %>%
+  rownames_to_column(var = "gene_id") %>%
+  rename(Tail_vs_Rest_FC = "log2FoldChange") %>%
+  rename(Tail_vs_Rest_padj =  "padj") %>%
+  select(gene_id,Tail_vs_Rest_FC,Tail_vs_Rest_padj) ->  
+  geneInfo.tail.DEseq2
+
+  
+
+dds.duct = getDEseq2Object(count.df = bulk.data.merged.QC.long,
+                 md =sampleInfo.QC.merged.major.parts,
+                 gi =geneInfo.major.parts, 
+                 design =  "duct" )
+dds.duct  = DESeq(dds.duct)
+as.data.frame(results(dds.duct)) %>%
+  rownames_to_column(var = "gene_id") %>%
+  rename(Duct_vs_Rest_FC = "log2FoldChange") %>%
+  rename(Duct_vs_Rest_padj =  "padj") %>%
+  select(gene_id,Duct_vs_Rest_FC,Duct_vs_Rest_padj) ->  
+  geneInfo.duct.DEseq2
+
+geneInfo.tail.DEseq2 %>%
+  inner_join(geneInfo.duct.DEseq2) %>%
+  inner_join(geneInfo.sac.DEseq2) ->
+  geneInfo.major.parts.DEseq2
+
+
+```
+
+
+### Join
+
+
+
+#### Join PCA 
+```{r, message=FALSE, warning=FALSE}
+sampleInfo.QC.merged %>%
+  left_join(sampleInfo.parts.PCA)  %>%
+  left_join(sampleInfo.major.PCA)  %>%
+  left_join(sampleInfo.ampullate.PCA)  %>%
+  left_join(sampleInfo.major.parts.PCA)->
+  sampleInfo.QC.PCA
+
+geneInfo.QC %>%
+  left_join(geneInfo.parts.PCA)  %>%
+  left_join(geneInfo.major.PCA)  %>%
+  left_join(geneInfo.ampullate.PCA) %>%
+  left_join(geneInfo.major.parts.PCA)->
+  geneInfo.QC.PCA
+
+```
+#### Join PLS-DA
+```{r, message=FALSE, warning=FALSE}
+
+sampleInfo.QC.merged %>%
+  left_join(sampleInfo.parts.PLS)  %>%
+  left_join(sampleInfo.major.PLS)  %>%
+  left_join(sampleInfo.ampullate.PLS)  %>%
+  left_join(sampleInfo.major.parts.PLS)->
+  sampleInfo.QC.PLS
+
+geneInfo.QC %>%
+  left_join(geneInfo.parts.PLS)  %>%
+  left_join(geneInfo.major.PLS)  %>%
+  left_join(geneInfo.ampullate.PLS) %>%
+  left_join(geneInfo.major.parts.PLS)->
+  geneInfo.QC.PLS
+
+```
+
+
+#### Join DEseq 
+```{r, message=FALSE, warning=FALSE}
+
+geneInfo.QC %>%
+  left_join(geneInfo.parts.DEseq2)  %>%
+  left_join(geneInfo.major.DEseq2)  %>%
+  left_join(geneInfo.ampullate.DEseq2) %>%
+  left_join(geneInfo.major.parts.DEseq2)->
+  geneInfo.QC.DEseq2
+
+
+```
+
+
+
+#### Join all
+```{r, message=FALSE, warning=FALSE }
+
+sampleInfo.QC.bulkRNA = 
+  sampleInfo.QC.PCA %>%
+  inner_join(sampleInfo.QC.PLS)%>%
+  mutate(Major_vs_Body_PC1 = -Major_vs_Body_PC1)
+
+geneInfo.QC.bulkRNA = geneInfo.QC.DEseq2 %>%
+  inner_join(geneInfo.QC.PCA) %>%
+  inner_join(geneInfo.QC.PLS) %>%
+  mutate(Major_vs_Body_PC1 = -Major_vs_Body_PC1)
+
+geneInfo.QC.bulkRNA %>% inner_join(proteinInfo) ->geneInfo.QC.bulkRNA.PIS
+
+
+
+
+normExpression.major.parts %>% rownames_to_column("gene_id") ->normExpression.major.parts.2
+
+geneInfo.QC.bulkRNA %>% inner_join(geneInfo) %>%
+  filter(MajorParts_PCA %in% c("Tail","Sac","Duct")) %>%
+  select(gene_id,geneName,max_tpm,
+         Body_vs_Head_PC1,Body_vs_Head_FC,
+         Major_vs_Body_PC1,Major_vs_Body_FC,
+         Major_part_PC1,Major_part_PC2,
+         MAG_part_Distance_PCA,MajorParts_PCA,
+         MAG_part_p1,MAG_part_p2,
+         MAG_part_Distance_PLS,MajorParts_PLS,
+         Tail_vs_Rest_FC,Sac_vs_Rest_FC,Duct_vs_Rest_FC
+  ) %>%
+  inner_join(normExpression.major.parts.2)  %>%
+  mutate(Major_vs_Body_FC = -Major_vs_Body_FC) %>%
+  rename(Major_part_PCA_PC1 = "Major_part_PC1" ) %>% 
+  rename(Major_part_PCA_PC2 = "Major_part_PC2" ) %>% 
+  rename(Major_part_PCA_dist = "MAG_part_Distance_PCA" ) %>% 
+  rename(Major_part_PCA_class = "MajorParts_PCA" ) %>% 
+  rename(Major_part_PLS_PC1 = "MAG_part_p1" ) %>% 
+  rename(Major_part_PLS_PC2 = "MAG_part_p2" ) %>% 
+  rename(Major_part_PLS_dist = "MAG_part_Distance_PLS" ) %>% 
+  rename(Major_part_PLS_class = "MajorParts_PLS" ) %>%
+  rename(duct_1 = "major-duct_217") %>%
+  rename(duct_2 = "major-duct_218") %>%
+  rename(duct_3 = "major-duct_219") %>%
+  rename(duct_4 = "major-duct_220") %>%
+  rename(duct_5 = "major-duct_221") %>%
+  rename(sac_1 = "major-sac_157") %>%
+  rename(sac_2 = "major-sac_160") %>%
+  rename(sac_3 = "major-sac_202") %>%
+  rename(sac_4 = "major-sac_203") %>%
+  rename(sac_5 = "major-sac_205") %>%
+  rename(sac_6 = "major-sac_225") %>%
+  rename(tail_1 = "major-tail_149") %>%
+  rename(tail_2 = "major-tail_152") %>%
+  rename(tail_3 = "major-tail_209") %>%
+  rename(tail_4 = "major-tail_210") %>%
+  rename(tail_5 = "major-tail_211") %>%
+  rename(tail_6 = "major-tail_226") %>% arrange(Major_part_PLS_class) %>%
+  select(-gene_id)->
+  geneInfo.QC.bulkRNA.majorGeneSet
+
+
+write_csv(geneInfo.QC.bulkRNA.majorGeneSet,"../../annotation/bulkRNA/majorGeneSet.csv")
+write_csv(geneInfo.QC.bulkRNA,"../../annotation/bulkRNA/PCA.PLS.DEseq2.info.csv")
+write_csv(geneInfo.QC.bulkRNA.majorGeneSet, "../../supplementaryTables/suppTable14.csv")
+
+```
+
+# Visualise
+## Supplementary figure 28
+### Major specific part 1
+```{r, message=FALSE, warning=FALSE}
+
+ geneInfo.tpm %>% ggplot(aes(x = "Expression", y =log10(max_tpm))) +
+  geom_violin(fill = "blue", alpha = 0.2,draw_quantiles = c(0.25,0.5,0.75)) +
+  geom_jitter(data = geneInfo.QC.bulkRNA.PIS,position = position_jitter(seed = 1)) +
+   geom_hline(yintercept = log10(4), color = "red") + 
+    xlab("Body vs Head")+
+  ylab("Max expression (log10(TPM))") +   theme_light() ->
+   geneInfo.QC.bulkRNA.body.tpm.plot
+
+
+ geneInfo.QC.bulkRNA %>% ggplot(aes(x = "PCA", y =Body_vs_Head_PC1)) +
+  geom_violin(fill = "blue", alpha = 0.2,draw_quantiles = c(0.25,0.5,0.75)) +
+  geom_jitter(data = geneInfo.QC.bulkRNA.PIS,position = position_jitter(seed = 1)) +
+   geom_hline(yintercept = 0, color = "red") + 
+    xlab("Body vs Head")+
+  ylab("Loading PC1") +   theme_light() ->
+   geneInfo.QC.bulkRNA.body.PCA.plot
+   
+ geneInfo.QC.bulkRNA %>% ggplot(aes(x = "PCA", y =Major_vs_Body_PC1)) +
+  geom_violin(fill = "blue", alpha = 0.2,draw_quantiles = c(0.25,0.5,0.75)) +
+  geom_jitter(data = geneInfo.QC.bulkRNA.PIS,position = position_jitter(seed = 1)) +
+   geom_hline(yintercept = 0, color = "red") + 
+    xlab("Major vs Body")+
+  ylab("Loading PC1") +   theme_light() ->
+   geneInfo.QC.bulkRNA.major.PCA.plot
+ 
+
+
+
+ sampleInfo.QC.bulkRNA %>% ggplot(aes(x = "PCA", y =Body_vs_Head_PC1 ,color = Tissue))+
+  geom_jitter() + geom_hline(yintercept = 0, color = "red") + 
+    xlab("Body vs Head")+
+  ylab(" PC1 (Variance 73.5 percent) ") +
+   theme_light() ->sampleInfo.QC.bulkRNA.body.PCA.plot
+ 
+ sampleInfo.QC.bulkRNA %>% ggplot(aes(x = "PCA", y =Major_vs_Body_PC1 ,color = Tissue))+
+  geom_jitter() + geom_hline(yintercept = 0, color = "red") + 
+    xlab("Major vs Body")+
+  ylab("PC1 (Variance 76.8 percent) ") +   theme_light() -> 
+   sampleInfo.QC.bulkRNA.major.PCA.plot
+ 
+ 
+ 
+ 
+ geneInfo.QC.bulkRNA.body.tpm.plot+ sampleInfo.QC.bulkRNA.body.PCA.plot + geneInfo.QC.bulkRNA.body.PCA.plot + 
+   sampleInfo.QC.bulkRNA.major.PCA.plot+ geneInfo.QC.bulkRNA.major.PCA.plot +
+   plot_layout(nrow = 1,guides = "collect",widths = c(3,1,3,1,3)) 
+
+ ggsave("../../supplementaryFigures/SuppFig28/SuppFig28.PCA.filter.pdf")
+
+
+```
+
+
+### Major specific part 2
+
+```{r, message=FALSE, warning=FALSE}
+
+geneInfo.major.parts.PCA %>% inner_join(proteinInfo) -> geneInfo.MAGpart.PIS
+defined = geneInfo.major.parts.PCA %>% filter(!is.na(MajorParts_PCA)) %>%
+  filter(MajorParts_PCA != "Undefined")
+undefined =  geneInfo.major.parts.PCA %>% filter(MajorParts_PCA == "Undefined")
+
+
+library(ggrepel)
+geneInfo.QC.bulkRNA %>%
+  ggplot(aes( x= Major_part_PC1,y = Major_part_PC2, color =MajorParts_PCA))+ geom_point(, size = 0.1) +
+  geom_point(data = defined, alpha = 0.2, color = "grey", size = 0.05)+
+  geom_point(data = geneInfo.MAGpart.PIS,  size = 1, color = "black") +
+  geom_text_repel(data = geneInfo.MAGpart.PIS,  aes(label = geneNameProtein), color = "black") + 
+  geom_circle(aes(x0 = 0, y0=0,r = 0.013), color = "black")+ 
+  theme_light()+
+  xlab("MAG PC1 Loading")+
+  ylab("MAG PC2 Loading")+
+  scale_color_manual(values = MajorColors) ->
+  MajorParts.PCA.genes
+
+sampleInfo.major.parts.PCA  %>% inner_join(sampleInfo.QC.merged) %>%
+  ggplot(aes( x= Major_part_PC1,y = Major_part_PC2, color =Tissue)) + geom_point() +theme_light()+
+  ylim( c(-90,50))+
+  xlab("MAG PC1 (52.0 percent)")+
+  ylab("MAG PC2 (27.0 percent)")+
+  scale_color_manual(values = MajorColors) ->
+  MajorParts.PCA.samples
+ 
+  
+MajorParts.PCA.genes/ (MajorParts.PCA.samples+plot_spacer())+ plot_layout(nrow = 2,guides = "collect",heights =c(5, 2)) 
+ ggsave("../../supplementaryFigures/SuppFig28/SuppFig28.Major.PCA.filter.pdf")
+
+
+
+
+
+
+```
+
+
+
+## Figure 2C
+
+```{r, message=FALSE, warning=FALSE}
+
+geneInfo.MAGpart.PIS
+
+samples = sampleInfo.QC.bulkRNA %>% filter(!is.na(MAG_part_p1 )) %>%
+  ggplot(aes(x = MAG_part_p1, y = MAG_part_p2, color = Tissue)) +
+  geom_point(shape = 18, size = 6)+ theme_no_axes() + 
+  scale_color_manual(values = MajorColors)
+
+library(ggrepel)
+
+
+
+geneInfo.MAGpart.PIS%>% 
+  inner_join(proteinInfo) ->
+  geneInfo.QC.major.PLS.proteins
+
+
+
+
+geneInfo.QC.bulkRNA %>% filter(MajorParts_PLS %in% c("Duct","Tail","Sac"))->
+  geneInfo.QC.bulkRNA.major
+geneInfo.QC.bulkRNA.PIS %>%
+  ggplot(aes(x = MAG_part_p1, y = MAG_part_p2))+ 
+  geom_density2d(data =geneInfo.QC.bulkRNA.major, 
+                 aes(x = MAG_part_p1, y = MAG_part_p2,color = MajorParts_PLS,), size = 0.8 , adjust = 0.8) +   geom_point( alpha = 0.6)+ geom_text_repel(aes(label = geneNameProtein), size = 3, color = "black",force = 3,max.overlaps = 20) +
+  theme_light() +
+  scale_color_manual(values = MajorColors)  ->
+  genes
+
+
+genes/samples
+
+ggsave("../../figures/figure2/figure2.C.PLS_map.pdf", width = 6,height = 7)
+
+```
+## Figure 2D
+```{r, message=FALSE, warning=FALSE}
+ 
+
+
+proteinsInSilk = getMajorAmpullateGlandProteins(repositoryPath)
+
+bulk.data.merged.QC.tpm %>%
+  inner_join(sampleInfo.QC.merged)  %>%
+  mutate(lg2TPM = log2(tpm+1)) %>%
+  group_by(gene_id) %>%
+  summarise( meanTPM = mean(tpm), sdTPM = sd(tpm)) %>%
+  inner_join(bulk.data.merged.QC.tpm) %>%
+  mutate(zscore = (tpm-meanTPM)/sdTPM) %>%
+  inner_join(proteinsInSilk) %>%
+  inner_join(sampleInfo.QC.merged) %>%
+  filter( Tissue %in%  c("Tail","Sac","Duct")) %>%
+  select(geneNameProtein,sample2,Tissue,zscore,meanTPM)->
+  geneinfo.tpm.major.parts.PIS
+ 
+
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+geneinfo.tpm.major.parts.PIS %>%
+  select(zscore, geneNameProtein, sample2) %>%
+  pivot_wider(names_from = "sample2", values_from = "zscore") %>%
+  column_to_rownames("geneNameProtein") ->
+  geneinfo.rpm.major.parts.silk.wide
+  
+geneinfo.rpm.major.parts.silk.wide
+
+
+library(cluster)
+library(factoextra)
+
+
+m <- c( "average", "single", "complete", "ward")
+names(m) <- c( "average", "single", "complete", "ward")
+
+df = geneinfo.rpm.major.parts.silk.wide
+ac <- function(x) {
+  agnes(df, method = x)$ac
+}
+sapply(m, ac)
+clust <- agnes(df, method = "ward")
+pltree(clust, cex = 0.6, hang = -1, main = "Dendrogram") 
+gap_stat <- clusGap(df, FUN = hcut, nstart = 25, K.max = 8, B = 50 )
+#produce plot of clusters vs. gap statistic
+#fviz_gap_stat(gap_stat)
+#dev.off()
+d <- dist(df, method = "euclidean")
+
+#perform hierarchical clustering using Ward's method
+final_clust <- hclust(d, method = "ward.D2" )
+#cut the dendrogram into 4 clusters
+
+genes = data.frame(geneName = names(cutree(final_clust, 6)) ,
+                   hierarchicalCluster = paste("c",cutree(final_clust, 6),sep ="_")) %>%   mutate(hierarchicalCluster2 = hierarchicalCluster)%>%
+mutate(hierarchicalCluster2 = gsub("c_4","tail_bulk_3",hierarchicalCluster2)) %>%
+mutate(hierarchicalCluster2 = gsub("c_3","tail_bulk_2",hierarchicalCluster2)) %>%
+mutate(hierarchicalCluster2 = gsub("c_2","tail_bulk_1",hierarchicalCluster2)) %>%
+mutate(hierarchicalCluster2 = gsub("c_1","tail_bulk_4",hierarchicalCluster2)) %>%
+mutate(hierarchicalCluster2 = gsub("c_5","sac_bulk_1",hierarchicalCluster2)) %>%
+mutate(hierarchicalCluster2 = gsub("c_6","sac_bulk_2",hierarchicalCluster2)) %>%
+arrange(hierarchicalCluster2)
+
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+
+
+d2 <- dist(t(df), method = "euclidean")
+
+#perform hierarchical clustering using Ward's method
+row_clust <- hclust(d, method = "ward.D2" )
+col_clust <- hclust(d2, method = "ward.D2" )
+
+row_clust$order
+row_clust$merge
+  
+clusters = genes$hierarchicalCluster2
+names(clusters) = genes$geneName
+
+clusters= clusters[rownames(geneinfo.rpm.major.parts.silk.wide)]
+
+library(ComplexHeatmap)
+#row_ha_left = rowAnnotation(Markers = clusters)
+
+
+colnames(geneinfo.rpm.major.parts.silk.wide)  = c("Duct_1","Duct_2","Duct_3","Duct_4","Duct_5",
+                                                  "Sac_1","Sac_2","Sac_3","Sac_4","Sac_5","Sac_6",
+                                                  "Tail_1","Tail_2","Tail_3","Tail_4","Tail_5","Tail_6")
+
+#colnames(geneinfo.rpm.major.parts.silk.wide)  = c(1:17) 
+
+clusters = factor(clusters, levels = c("sac_bulk_2","sac_bulk_1",
+                                         "tail_bulk_4",
+                                         "tail_bulk_3",
+                                         "tail_bulk_2",
+                                         "tail_bulk_1"))
+
+row_ha_left = rowAnnotation(Markers = clusters,col = list(Markers = bulkClustersH))
+
+Length = merged_df$Length
+names(Length) = merged_df$geneNameProtein
+
+f2 = circlize::colorRamp2(c(0, max(log10(Length))), c("#FFFFFF","black"), space = "RGB")
+
+row_ha_right = rowAnnotation(Length = log10(Length),col = list(Length = f2))
+
+
+
+
+pdf("../../figures/figure2/figure2D.heatmap.pdf", width = 6, height = 5)
+
+ComplexHeatmap::Heatmap(geneinfo.rpm.major.parts.silk.wide,
+                        row_split = clusters, cluster_columns = FALSE,
+                        cluster_rows = TRUE, column_order = c(17:1),
+                         left_annotation = row_ha_left, 
+                        show_column_names = TRUE)
+
+
+
+dev.off()
+
+
+```
+## Figure 2E
+
+
+```{r, message=FALSE, warning=FALSE}
+orderNames = c("MaSp2f","MaSp2e","MaSp2c","SpiCE-LMa6","MaSp1a","MaSp1b","MaSp4","SpiCE-LMa3","MaSp2b" ,"SpiCE-LMa5","MaSp1c", "AmSp-like2","AmSp-like1","SpiCE-LMa2","MaSp3a","MaSp3b","SpiCE-LMa4","SpiCE-LMa1")
+
+levels(df_long$geneNameProtein) <- orderNames
+# Plot the stacked bar plot with colored amino acid categories
+plot1 <- ggplot(df_long, aes(x = geneNameProtein, y = Percentage, fill = category)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Protein", y = "Percentage", fill = "Amino Acid Category") +
+  ggtitle("Amino Acid Percentages by Category") +
+  scale_fill_manual(values = category_colors) +  # Use the defined colors
+  guides(x =  guide_axis(angle = 45)) +
+  theme_minimal() #+
+  theme(legend.position = "bottom")  # Adjust legend position
+plot2 <- aa_plot + plot1
+
+
+plot1+coord_flip() 
+ggsave("../../figures/figure2/figure2E.aaComposition.pdf",  width = 30, height = 20, units = "cm")
+```
+
+
+
+
+
+## Supplementary figure 27a
+```{r, message=FALSE, warning=FALSE}
+
+sampleInfo.QC.merged %>%
+  filter(Tissue %in%  c("Head",
+                        "WholeBody",
+                        "AciniPyri",
+                        "Flagelliform",
+                        "Major",
+                        "Minor",
+                        "Aggregate"
+                        )) ->
+  sampleInfo.QC.merged.wholeTissues
+
+bulk.data.merged.QC.tpm %>% inner_join(sampleInfo.QC.merged.wholeTissues)->   bulk.data.merged.QC.tpm.tissues
+
+
+bulk.data.merged.QC.tpm.tissues %>% group_by(Tissue,gene_id) %>%
+  summarise(mean = mean(tpm)) %>%
+  inner_join(getGeneInfoFull(repositoryPath)) %>%
+  pivot_wider(values_from = "mean", names_from = "Tissue") %>%
+  arrange(geneName) %>%
+  select(geneName,Major) %>%
+  rename(TPM = "Major") %>%
+  filter(TPM >4)-> bulkRNA.tpm
+
+
+
+protein.gland %>%
+  filter(percent > 0) %>%
+  group_by(geneName,type) %>% 
+  summarise(n = n(), percent_mean = mean(percent), percent_sd = sd(percent), min = min(percent)) %>%
+  filter(n > 1) %>%
+  arrange(-percent_mean) %>%
+  select(geneName, percent_mean,n) %>%
+  rename(percent_Spectra = percent_mean) ->
+  protein.percent
+ 
+inner_join(protein.percent, geneInfo) %>% inner_join(bulkRNA.tpm)  %>%
+  select(geneName,percent_Spectra,TPM) ->
+  major.gland.tpm.spectra
+ 
+
+major.gland.tpm.spectra %>% inner_join(proteinInfo) -> major.gland.tpm.spectra.PIS
+major.gland.tpm.spectra %>% left_join(geneInfo.QC.bulkRNA.majorGeneSet)  %>%
+  mutate(MajorGeneSet = "YES") %>%
+  mutate(MajorGeneSet = replace(MajorGeneSet, is.na(Body_vs_Head_PC1),"NO"))-> 
+  major.gland.tpm.spectra.MGS
+
+
+
+major.gland.tpm.spectra.MGS %>%
+  ggplot(aes( x= log2(percent_Spectra),y = log2(TPM)))+
+  geom_point(, size = 0.1, alpha = 0.5) +
+  geom_density2d() +
+  geom_point(data = major.gland.tpm.spectra.PIS,  size = 1, color = "black") +
+  geom_text_repel(data = major.gland.tpm.spectra.PIS,  aes(label = geneNameProtein), color = "black", size = 3) + 
+  theme_light() + geom_smooth(method = "lm")->
+  MajorParts.PCA.genes
+
+
+MajorParts.PCA.genes+stat_cor(method="pearson") -> 
+  SuppFig27
+  
+SuppFig27
+ggsave("../../supplementaryFigures/SuppFig27/SupplFig27.a.pdf",plot = SuppFig27, width = 3, height = 3) 
+
+
+
+
+
+
+```
+
+
+
+
+
+## Overlap with sc and spatial
+```{r, message=FALSE, warning=FALSE}
+
+numberOfTopGenes = 100
+markerGenes.sc = read_csv("../../annotation/scRNA/Major/Markers.SCT.integrated.majorCluster.all.2024.csv") 
+
+# Top marker genes
+markerGenes.sc %>%
+  filter(p_val_adj < 0.05) %>%
+  group_by(cluster) %>%
+  arrange(p_val_adj) %>%
+  mutate(rank = 1:n()) ->
+  markerGenes.sc
+
+markerGenes.sc %>%
+  filter(rank <= numberOfTopGenes) ->
+  markerGenes.sc.top
+
+
+markerGenes.sc.top %>% group_by(cluster) %>% arrange(cluster,rank)
+
+
+
+markerGenes.spatial = read_csv("../../annotation/spatialData/markerGenes.2024.all.csv") %>%
+  rename(scGeneName = "gene") %>%inner_join(getGeneInfoFull(repositoryPath))
+
+# Top marker genes
+markerGenes.spatial %>%
+  filter(p_val_adj < 0.05) %>%
+  group_by(cluster)%>%
+  arrange(p_val_adj) %>%
+  mutate(rank = 1:n()) ->
+  markerGenes.spatial
+
+markerGenes.spatial %>%
+  filter( rank <= numberOfTopGenes)->
+  markerGenes.spatial.top
+
+```
+
+### Supplementary table 15
+```{r, message=FALSE, warning=FALSE}
+markerGenes.sc = read_csv("../../annotation/scRNA/Major/Markers.SCT.integrated.majorCluster.all.2024.csv") 
+
+# Top marker genes
+markerGenes.sc %>%
+  filter(p_val_adj < 0.05) %>%
+  group_by(cluster) %>%
+  arrange(cluster,p_val_adj,-pct.1,-avg_log2FC) %>%
+  mutate(rank = 1:length(p_val_adj)) %>%
+  select(geneName, cluster,rank) %>%
+  filter(rank <100)->
+  markerGenes.sc.t15
+
+markerGenes.sc.t15 %>% 
+   pivot_wider(names_from = "cluster", values_from = "rank",values_fill = NA) ->
+  sc_DE         
+
+
+
+markerGenes.spatial = read_csv("../../annotation/spatialData/markerGenes.2024.all.csv") %>%
+  rename(scGeneName = "gene") %>%inner_join(getGeneInfoFull(repositoryPath))
+
+# Top marker genes
+markerGenes.spatial %>%
+  filter(p_val_adj < 0.05) %>%
+  group_by(cluster)%>%
+  arrange(p_val_adj,-avg_log2FC) %>%
+  mutate(rank = 1:n())  %>%
+  select(geneName, cluster,rank)%>%
+  filter(rank <100)->
+  markerGenes.spatial
+ 
+markerGenes.spatial %>% 
+  pivot_wider(names_from = "cluster", values_from = "rank",values_fill = NA) ->
+  spatial_DE
+ 
+
+
+geneInfo.tail.DEseq2  %>%
+  filter(Tail_vs_Rest_padj < 0.001) %>%
+  filter(Tail_vs_Rest_FC > 2) %>%
+  arrange(Tail_vs_Rest_padj, -Tail_vs_Rest_FC) %>%
+  mutate(Tail = 1:n()) %>%
+  select(gene_id,Tail)-> 
+  Tail.DE
+geneInfo.duct.DEseq2 %>%
+  filter(Duct_vs_Rest_padj < 0.001) %>%
+  filter(Duct_vs_Rest_FC > 2)  %>%
+  arrange(Duct_vs_Rest_padj, -Duct_vs_Rest_FC) %>%
+  mutate(Duct = 1:n())%>%
+  select(gene_id,Duct) -> 
+  Duct.DE
+  
+geneInfo.sac.DEseq2%>%
+  filter(Sac_vs_Rest_padj < 0.001) %>%
+  filter(Sac_vs_Rest_FC > 2) %>%
+  arrange(Sac_vs_Rest_padj, -Sac_vs_Rest_FC) %>%
+  mutate(Sac = 1:n())%>%
+  select(gene_id,Sac)-> 
+  Sac.DE
+
+full_join(Tail.DE,Sac.DE) %>% full_join(Duct.DE) -> bulk.DE
+
+geneInfo %>% select(gene_id,geneName ) %>% inner_join(bulk.DE) %>%
+  select(-gene_id) -> bulk.DE
+
+
+
+           
+full_join(sc_DE,spatial_DE) %>%full_join(bulk.DE) %>%
+  arrange(ZoneA_MaSp1,ZoneA_MaSp2,ZoneB_MaSp3,`ZoneC_SpiCE-LMa1`) -> table15.2
+
+
+
+write_csv(table15.2, file = "../../supplementaryTables/SuppTable15.csv")
+```
+
+### Table 2
+
+
+```{r, message=FALSE, warning=FALSE }
+
+
+
+sc_DE%>% inner_join(proteinInfo) %>% select(geneNameProtein,c(4:9))  %>% arrange(geneNameProtein) ->table2.sc
+spatial_DE%>% inner_join(proteinInfo)  %>% arrange(geneNameProtein)%>% select(geneNameProtein,2,3,4)->table2.spatial
+bulk.DE%>% inner_join(proteinInfo)  %>% arrange(geneNameProtein)%>% select(geneNameProtein,2,3,4)->table2.bulk
+
+table2.sc %>%
+  pivot_longer(names_to = "region", values_to = "rank", -geneNameProtein) %>%
+  filter(!is.na(rank))%>% 
+  mutate(type = "Single Cell Transcriptomics")  ->
+  table2.sc
+table2.spatial %>%
+  pivot_longer(names_to = "region", values_to = "rank", -geneNameProtein) %>%
+  filter(!is.na(rank))%>% 
+  mutate(type = "Spatial Transcriptomics") ->
+  table2.spatial
+table2.bulk %>%
+  pivot_longer(names_to = "region", values_to = "rank", - geneNameProtein) %>%
+  filter(!is.na(rank)) %>% 
+  mutate(type = "Bulk RNA")->
+  table2.bulk
+
+bind_rows(table2.sc,table2.spatial,table2.bulk) %>% arrange(geneNameProtein) -> 
+  table2
+
+write_csv(table2, file = "../../tables/table2.csv")
+
+
+
+```
+## Supplementary figure 30
+
+```{r, message=FALSE, warning=FALSE}
+
+geneInfo.QC.bulkRNA.major %>% inner_join(geneNames.all) %>%
+  select(MAG_part_p1,MAG_part_p2,gene_id ) %>%
+  inner_join(markerGenes.sc.top) %>%
+  arrange(cluster) %>%
+  select(MAG_part_p1,MAG_part_p2,geneName,cluster) %>%
+  ggplot(aes(x = MAG_part_p1, y =MAG_part_p2 ))  + 
+  facet_wrap(.~cluster, ncol = 2) +
+  geom_density2d(data =geneInfo.QC.bulkRNA.major,
+                 aes(x = MAG_part_p1, y = MAG_part_p2,color = MajorParts_PLS,),
+                 size = 0.5 , adjust = 0.8,alpha = 0.9)+
+  geom_point()+ 
+  scale_color_manual(values = MajorColors)  +
+  theme_light()->
+  scBulk.plot
+
+
+
+geneInfo.QC.bulkRNA.major %>%
+  inner_join(geneNames.all) %>%
+  select(MAG_part_p1,MAG_part_p2,geneName ) %>%
+  inner_join(markerGenes.spatial.top) %>%
+  arrange(cluster) %>%
+  select(MAG_part_p1,MAG_part_p2,geneName,cluster) %>%
+    ggplot(aes(x = MAG_part_p1, y =MAG_part_p2 ))  + facet_wrap(.~cluster, ncol = 1) + geom_density2d(data =geneInfo.QC.bulkRNA.major, aes(x = MAG_part_p1, y = MAG_part_p2,color = MajorParts_PLS),alpha = 0.9, size = 0.5 , adjust = 0.8)+geom_point() + 
+  scale_color_manual(values = MajorColors) +
+theme_light()  -> zoneBulk.plot
+
+
+zoneBulk.plot + scBulk.plot + plot_layout(guides = "collect",widths = c(2, 3)) + plot_annotation(tag_levels = 'A')->top
+ 
+ggsave("../../supplementaryFigures/SuppFig30/SuppFig30ab.pdf", width = 7, height = 7,plot = top)
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+
+
+markerGenes.sc.top %>% 
+  select(geneName,cluster,rank) %>%
+  rename(scCluster = "cluster")  %>%
+  group_by(geneName) %>%
+  filter(rank < 50) %>%
+  arrange(rank) %>%
+  select(geneName,scCluster)->
+  sc.clusters
+markerGenes.spatial.top %>% 
+  select(geneName,cluster,rank)%>%
+  rename(spatialCluster = "cluster")%>%
+  filter(rank < 50) %>%
+  group_by(geneName) %>%
+  arrange(rank) %>%
+    select(geneName,spatialCluster)->
+  sp.clusters
+
+
+inner_join(sc.clusters,sp.clusters) %>% 
+  group_by(scCluster,spatialCluster) %>%
+  summarise(n = n()) %>%
+  pivot_wider(names_from ="spatialCluster",values_from = n, values_fill = 0 )-> 
+  sc_spatial
+
+
+sc_spatial %>%
+  pivot_longer(names_to = "spatialCluster", values_to = "count", -scCluster) %>%
+  mutate(count = replace(count, count == 0, NA)) %>%
+  mutate(scCluster = factor(scCluster, levels = clusterOrder)) %>%
+  ggplot(aes(x = scCluster,y = spatialCluster,fill = count)) + 
+    geom_tile(lwd = 0.5,
+            linetype = 1,width=0.8,height = 0.8)+
+  theme_light() + scale_fill_gradient2(midpoint=3, low="blue", mid="white",
+                     high="red", space ="Lab" )+
+  geom_text(aes(label = count), color = "black", size = 4)+
+  theme(axis.text.x=element_text(angle = 35, hjust = 1)) ->
+  sc_spatial.plot
+
+
+top/sc_spatial.plot + plot_layout(guides = "collect",heights = c(4, 2)) 
+
+ggsave("../../supplementaryFigures/SuppFig30/SuppFig30c.pdf", width = 7, height = 10)
+
+
+
+
+```
+
+
+
+
+

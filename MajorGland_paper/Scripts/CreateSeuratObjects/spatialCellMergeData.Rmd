@@ -1,0 +1,120 @@
+---
+title: "Create seurate spatial Object"
+author: "Johan"
+date: "01/02/2024"
+output: html_document
+
+---
+
+```{r setup, include=FALSE}
+library(Seurat)
+library(tidyverse)
+
+repositoryPath = "~/git/Rising-Lab/MajorGland_paper"
+
+```
+
+#GeneInfo
+
+```{r load geneInfo}
+
+source("../loadGeneInfo.R")
+
+scGeneInfo = getGeneInfoFull(repositoryPath)
+scGeneInfo %>% 
+  mutate(Group = replace(x = Group,
+                        values = "Mito", 
+                        list = grepl(pattern = "_MT", x = Chr)
+                        ))->
+  
+scGeneInfo 
+
+```
+
+#SampleInfo
+
+
+```{r load doubletsInfo}
+rename = dplyr::rename
+
+
+samleInfo.spatial = data.frame(NGI_Sample_ID =c( "P18163_1001",
+"P18163_1002",
+"P18163_1003",
+"P18163_1004",
+"P18163_1005",
+"P22555_1001",
+"P22555_1002",
+"P22555_1003"),
+Sample = c("Slide1",
+"Slide2",
+"Slide3",
+"Slide4",
+"Slide5",
+"Slide6",
+"Slide7",
+"Slide8"))
+
+```
+
+# Load 10x data
+
+```{r adding data to the analysis, include=FALSE}
+
+test = Load10X_Spatial(data.dir = "../../data/spatialRNA/filtered_feature_bc_matrices/P22555_1003/", slice = "Slide8")
+
+counts = test@assays$Spatial@counts
+names = rownames(counts)
+genes = intersect(names, scGeneInfo$sc_gene_id) 
+MTgenes = setdiff(names, scGeneInfo$sc_gene_id) 
+scGeneInfo %>% filter(sc_gene_id %in% genes) ->scGeneInfo
+oldName = c(scGeneInfo$sc_gene_id,MTgenes)
+newName =  c(scGeneInfo$scGeneName,MTgenes)
+
+
+S8 = Load10X_Spatial(data.dir = "../../data/spatialRNA/filtered_feature_bc_matrices/P22555_1003/", slice = "Slide8",)
+
+
+spatial = S8@assays$Spatial
+dim(spatial@counts)
+spatial@counts = spatial@counts[oldName,]
+spatial@data = spatial@data[oldName,]
+spatial@counts@Dimnames[[1]] = newName
+spatial@data@Dimnames[[1]] = newName
+rownames(spatial@meta.features) = newName
+S8@assays$Spatial = spatial
+```
+
+```{r}
+
+samples10x.spatial = list()
+for(i in 1:nrow(samleInfo.spatial)){
+  sample = samleInfo.spatial[i,]
+  dir = paste("../../data/spatialRNA/filtered_feature_bc_matrices",sample$NGI_Sample_ID ,sep ="/")
+  Slide = Load10X_Spatial(data.dir =dir, slice = sample$Sample)
+  spatial = Slide@assays$Spatial
+  spatial@counts = spatial@counts[oldName,]
+  spatial@data = spatial@data[oldName,]
+  spatial@counts@Dimnames[[1]] = newName
+  spatial@data@Dimnames[[1]] = newName
+  rownames(spatial@meta.features) = newName
+  Slide@assays$Spatial = spatial
+  Slide$Sample = sample$Sample
+  Slide$NTtag = rownames(Slide@meta.data)
+  samples10x.spatial[sample$Sample] =Slide
+}
+
+
+#merging all samples
+samples10x.spatial.other = samples10x.spatial[-1]
+LarSco.spatial.combined <-
+  merge(samples10x.spatial[[1]],
+        y=samples10x.spatial.other,
+        add.cell.ids = samleInfo.spatial$Sample
+        )
+
+saveRDS(LarSco.spatial.combined,"../../data/spatialRNA/raw_8_slides.RDS")
+
+
+
+```
