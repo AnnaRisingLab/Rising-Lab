@@ -1,0 +1,52 @@
+geneNameProtein,region,rank,type
+AmSp-like1,ZoneB_MaSp3,12,Single Cell Transcriptomics
+AmSp-like1,ZoneB,9,Spatial Transcriptomics
+AmSp-like1,Sac,49,Bulk RNA
+AmSp-like2,ZoneB_MaSp3,8,Single Cell Transcriptomics
+AmSp-like2,ZoneC,61,Spatial Transcriptomics
+AmSp-like2,ZoneB,4,Spatial Transcriptomics
+AmSp-like2,Sac,42,Bulk RNA
+MaSp1a,ZoneA_MaSp1,1,Single Cell Transcriptomics
+MaSp1a,ZoneA_MaSp2,13,Single Cell Transcriptomics
+MaSp1a,ZoneA,1,Spatial Transcriptomics
+MaSp1a,Tail,38,Bulk RNA
+MaSp1b,ZoneA_MaSp1,2,Single Cell Transcriptomics
+MaSp1b,ZoneA,4,Spatial Transcriptomics
+MaSp1c,ZoneA_MaSp1,3,Single Cell Transcriptomics
+MaSp1c,ZoneA,32,Spatial Transcriptomics
+MaSp2b,ZoneA_MaSp2,3,Single Cell Transcriptomics
+MaSp2b,ZoneA,31,Spatial Transcriptomics
+MaSp2b,Tail,19,Bulk RNA
+MaSp2c,ZoneA_MaSp2,2,Single Cell Transcriptomics
+MaSp2c,ZoneA,3,Spatial Transcriptomics
+MaSp2c,Tail,9,Bulk RNA
+MaSp2e,ZoneA_MaSp2,4,Single Cell Transcriptomics
+MaSp2e,ZoneA,6,Spatial Transcriptomics
+MaSp2e,Tail,6,Bulk RNA
+MaSp2f,ZoneA_MaSp2,1,Single Cell Transcriptomics
+MaSp2f,ZoneA,5,Spatial Transcriptomics
+MaSp2f,Tail,1,Bulk RNA
+MaSp3a,ZoneB_MaSp3,5,Single Cell Transcriptomics
+MaSp3a,ZoneB,2,Spatial Transcriptomics
+MaSp3a,Sac,19,Bulk RNA
+MaSp3b,ZoneB_MaSp3,1,Single Cell Transcriptomics
+MaSp3b,ZoneB,3,Spatial Transcriptomics
+MaSp3b,Sac,18,Bulk RNA
+MaSp4,ZoneA_MaSp2,12,Single Cell Transcriptomics
+MaSp4,Tail,34,Bulk RNA
+SpiCE-LMa1,ZoneC_SpiCE-LMa1,1,Single Cell Transcriptomics
+SpiCE-LMa1,ZoneC,13,Spatial Transcriptomics
+SpiCE-LMa1,Sac,68,Bulk RNA
+SpiCE-LMa2,ZoneB_MaSp3,6,Single Cell Transcriptomics
+SpiCE-LMa2,ZoneC_SpiCE-LMa1,11,Single Cell Transcriptomics
+SpiCE-LMa2,ZoneC,16,Spatial Transcriptomics
+SpiCE-LMa2,ZoneB,23,Spatial Transcriptomics
+SpiCE-LMa2,Sac,63,Bulk RNA
+SpiCE-LMa3,ZoneA_SpiCE-LMa3,28,Single Cell Transcriptomics
+SpiCE-LMa4,ZoneB_MaSp3,68,Single Cell Transcriptomics
+SpiCE-LMa4,ZoneC_SpiCE-LMa1,85,Single Cell Transcriptomics
+SpiCE-LMa4,ZoneB,72,Spatial Transcriptomics
+SpiCE-LMa4,Sac,39,Bulk RNA
+SpiCE-LMa5,ZoneA_SpiCE-LMa3,11,Single Cell Transcriptomics
+SpiCE-LMa6,ZoneA_SpiCE-LMa3,6,Single Cell Transcriptomics
+SpiCE-LMa6,ZoneA,12,Spatial Transcriptomics
