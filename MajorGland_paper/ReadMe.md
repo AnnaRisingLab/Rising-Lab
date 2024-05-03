@@ -1,5 +1,4 @@
-# Paper1
-
+# Origin, Structure and Composition of a Spider Major Ampullate Silk Fiber revealed by Genomics, Proteomics, and Single-Cell and Spatial Transcriptomics 
 
 ## Scripts
 Here you will find the code and the annotation used for the analysis of the major ampullate gland in the bridge spider .
