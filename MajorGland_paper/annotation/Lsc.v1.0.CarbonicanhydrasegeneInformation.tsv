@@ -1,0 +1,27 @@
+makerids	Gene Name	CAH Class	Group
+maker-000074F-augustus-gene-23.9	Gene1	Cytosolic/CA1	Carbonic anhydrase
+maker-000401F-est_gff_StringTie-gene-5.1	Gene2	Secreted	Carbonic anhydrase
+maker-000401F-augustus-gene-5.1-GeneA	Gene3	Secreted	Carbonic anhydrase
+maker-000401F-augustus-gene-5.1-GeneB	Gene4	Secreted	Carbonic anhydrase
+maker-000401F-est_gff_StringTie-gene-5.6	Gene5	Acatalytic	Carbonic anhydrase
+maker-000518F-est_gff_StringTie-gene-2.5	Gene6	Cytosolic*	Carbonic anhydrase
+evm-000095F-processed-gene-25.8	Gene7	Acatalytic	Carbonic anhydrase
+maker-000267F-exonerate_protein2genome-gene-10.6	Gene8	GPI-anchored	Carbonic anhydrase
+maker-000050F-est_gff_StringTie-gene-28.0	Gene9	Acatalytic	Carbonic anhydrase
+maker-000064F-exonerate_protein2genome-gene-28.1	Gene10	Not_CA	Carbonic anhydrase
+maker-000401F-est_gff_StringTie-gene-4.0	Gene11	Secreted	Carbonic anhydrase
+maker-000401F-est_gff_StringTie-gene-4.1	Gene12	Acatalytic/CA10	Carbonic anhydrase
+maker-000401F-est_gff_StringTie-gene-4.2	Gene13	Membrane-bound	Carbonic anhydrase
+maker-000401F-est_gff_StringTie-gene-4.3	Gene14	Secreted	Carbonic anhydrase
+maker-000401F-est_gff_StringTie-gene-4.4	Gene15	Acatalytic	Carbonic anhydrase
+maker-000401F-est_gff_StringTie-gene-5.4	Gene16	Secreted	Carbonic anhydrase
+maker-000401F-est_gff_StringTie-gene-5.5	Gene17	Acatalytic/CA_10	Carbonic anhydrase
+evm-000184F-processed-gene-4.4	Gene18	Acatalytic	Carbonic anhydrase
+maker-000184F-est_gff_StringTie-gene-9.0	Gene19	Acatalytic/CA_10	Carbonic anhydrase
+maker-000259F-est_gff_StringTie-gene-6.5	Gene20	Mitochondrial**	Carbonic anhydrase
+maker-000244F-est_gff_StringTie-gene-12.4	Gene21	Secreted	Carbonic anhydrase
+maker-000244F-est_gff_StringTie-gene-12.8	Gene22	Secreted	Carbonic anhydrase
+maker-000244F-est_gff_StringTie-gene-12.5	Gene23	Secreted	Carbonic anhydrase
+maker-000870F-est_gff_StringTie-gene-0.0	Gene24	Acatalytic	Carbonic anhydrase
+maker-000014F-augustus-gene-28.8	Gene25	Not_CA	Carbonic anhydrase
+maker-000277F-est_gff_StringTie-gene-5.0	Gene26	Acatalytic	Carbonic anhydrase

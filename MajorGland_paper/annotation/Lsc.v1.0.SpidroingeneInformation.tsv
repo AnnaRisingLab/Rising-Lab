@@ -1,0 +1,36 @@
+makerids	Gene Name	Spidroin Class	Group
+maker-000034F-exonerate_protein2genome-gene-41.0	AcSpa	Aciniform Gland	Spidroin
+maker-000162F-augustus-gene-12.16	AcSp1b	Aciniform Gland	Spidroin
+augustus_masked-000162F-processed-gene-12.12	AcSp1c	Aciniform Gland	Spidroin
+maker-000209F-augustus-gene-8.0	AgSp1	Aggregate Gland	Spidroin
+maker-000032F-augustus-gene-42.14	AgSp2a	Aggregate Gland	Spidroin
+evm-000032F-processed-gene-42.13	AgSp2b	Aggregate Gland	Spidroin
+evm-000002F-processed-gene-17.3	FlSp-like	Flagelliform Gland	Spidroin
+maker-000081F-augustus-gene-24.2	FlSpa	Flagelliform Gland	Spidroin
+evm-000196F-processed-gene-10.4	FlSpb	Flagelliform Gland	Spidroin
+maker-000196F-augustus-gene-10.3	FlSpc	Flagelliform Gland	Spidroin
+evm-000033F-processed-gene-27.15-GeneA	MaSp1a	Major Ampullate Gland	Spidroin
+evm-000033F-processed-gene-27.15-GeneB	MaSp1b	Major Ampullate Gland	Spidroin
+evm-000033F-processed-gene-27.15-GeneC	MaSp1c	Major Ampullate Gland	Spidroin
+maker-000033F-exonerate_protein2genome-gene-24.4	MaSp2a	Major Ampullate Gland	Spidroin
+evm-000033F-processed-gene-24.21-GeneB	MaSp2b	Major Ampullate Gland	Spidroin
+evm-000033F-processed-gene-27.15-GeneD	MaSp3a	Major Ampullate Gland	Spidroin
+evm-000033F-processed-gene-27.15-GeneE	MaSp3b	Major Ampullate Gland	Spidroin
+evm-000033F-processed-gene-24.21-GeneA	MaSp2c	Major Ampullate Gland	Spidroin
+augustus_masked-000159F-processed-gene-9.3	MaSp2d	Major Ampullate Gland	Spidroin
+maker-000175F-exonerate_protein2genome-gene-8.3-GeneA	MaSp2e	Major Ampullate Gland	Spidroin
+maker-000175F-exonerate_protein2genome-gene-8.3-GeneB	MaSp2f	Major Ampullate Gland	Spidroin
+evm-000033F-processed-gene-22.11	MaSp4	Major Ampullate Gland	Spidroin
+evm-000071F-processed-gene-30.32-GeneA	MiSpa	Minor Ampullate Gland	Spidroin
+evm-000071F-processed-gene-30.32-GeneB	MiSpb	Minor Ampullate Gland	Spidroin
+maker-000071F-augustus-gene-30.4	MiSpc	Minor Ampullate Gland	Spidroin
+maker-000737F-exonerate_protein2genome-gene-0.0	MiSpd	Minor Ampullate Gland	Spidroin
+evm-000148F-processed-gene-19.16-GeneB	PySpa	Pyriform Gland	Spidroin
+evm-000148F-processed-gene-19.16-GeneA	PySpb	Pyriform Gland	Spidroin
+maker-000003F-est_gff_StringTie-gene-29.1	Spidroin1	Unclassified	Spidroin
+maker-000032F-exonerate_protein2genome-gene-42.7	Spidroin2	Unclassified	Spidroin
+maker-000428F-est_gff_StringTie-gene-4.8	Spidroin3	Unclassified	Spidroin
+maker-000010F-est_gff_StringTie-gene-15.7	TuSp-like	Tubuliform Gland	Spidroin
+maker-000014F-augustus-gene-20.0	TuSpa	Tubuliform Gland	Spidroin
+augustus_masked-000089F-processed-gene-1.1	TuSpb	Tubuliform Gland	Spidroin
+augustus_masked-000588F-processed-gene-0.19	TuSpc	Tubuliform Gland	Spidroin
