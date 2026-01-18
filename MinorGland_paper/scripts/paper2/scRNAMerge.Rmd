@@ -1,0 +1,2083 @@
+---
+title: "Clustering"
+author: "Wenqing Chen"
+date: "2023-02-22"
+output: html_document
+
+params:
+  repositoryPath: ~/git/spidersilk
+  geneInfo: Rscripts/loadGeneInfo.R
+  extraFunctions: Rscripts/customFunctions.R
+  submajormarker: results/scRNA/majorGland/major.glandSpecific.csv
+  minorResultDir: results/scRNA/minorGland/integration_add_MarkerGenes
+  majorResultDir: results/scRNA/majorGland
+  ampullateResultDir: results/scRNA/AmpullateGland
+  
+  
+---
+
+# library
+```{r setup2, include=FALSE}
+
+library(Seurat)
+library(tidyverse)
+library(dplyr) 
+library(cowplot)
+library(ggplot2)
+library(pheatmap)
+library(rafalib)
+library(ggraph)
+library(clustree)
+library(ComplexHeatmap)
+library(circlize)
+
+source(paste(params$repositoryPath, params$geneInfo, sep = "/"))
+source(paste(params$repositoryPath, params$extraFunctions, sep = "/"))
+
+
+"~/git/Rising-Lab/MajorGland_paper"
+
+repositoryPath = "~/git/Rising-Lab/MajorGland_paper"
+geneInfo = getGeneInfoFull(repositoryPath = repositoryPath)
+
+#install.packages("wordcloud")
+#library(wordcloud)
+#install.packages("wordcloud2")
+#library(wordcloud2)
+
+
+
+
+```
+
+
+
+# Gene information
+```{r}
+
+proteinInfo = getMajorAmpullateGlandProteinsSC(repositoryPath = repositoryPath)
+
+geneInfo = read_csv("../../annotation/Lsc.v1.0.3.geneInfo.csv.gz")
+
+
+termOrder = c("MiSp","AmSp-like","Spidroins","SpiCE",
+             "SignalPeptide","RibosomalProteins","NoSignalPeptide")
+
+geneInfo %>%
+  mutate(Term = signalP) %>%
+  mutate(Term = replace(Term,Term == "Yes","SignalPeptide")) %>%
+  mutate(Term = replace(Term,Term == "No","NoSignalPeptide")) %>%
+  mutate(Term = replace(Term, grepl("MiSp",geneName),"MiSp")) %>%
+  mutate(Term = replace(Term, grepl("MaSp",geneName),"Spidroins")) %>%
+  mutate(Term = replace(Term, grepl("AcSp",geneName),"Spidroins")) %>%
+  mutate(Term = replace(Term, grepl("AgSp",geneName),"Spidroins")) %>%
+  mutate(Term = replace(Term, grepl("FlSp",geneName),"Spidroins")) %>%
+  mutate(Term = replace(Term, grepl("TuSp",geneName),"Spidroins")) %>%
+  mutate(Term = replace(Term, grepl("PySp",geneName),"Spidroins")) %>%
+  mutate(Term = replace(Term, grepl("^(rpl|rps)",geneName),"RibosomalProteins")) %>%
+  mutate(Term = replace(Term, grepl("^SpiCE",geneNameProtein),"SpiCE")) %>%
+  mutate(Term = replace(Term, grepl("^AmSp-like",geneNameProtein),"AmSp-like")) %>%
+  mutate(Term = factor(Term, 
+                       levels = termOrder) ) ->
+  geneInfo
+
+#geneInfo = getGeneInfoFull(repositoryPath = repositoryPath)
+
+
+
+  
+```
+# Protein information
+```{r}
+
+# Proteomics data
+MQ_data.AmpGl.QC.summary = read_csv("../../data/proteomics/MQ_data.AmpGl.QC.summary.csv")
+
+
+MQ_data.AmpGl.QC.summary %>%
+  separate_rows(geneName, sep = ";") %>%
+  inner_join(geneInfo) %>%
+  select(geneName,Part,gland,relativeIntensity, geneNameProtein,scGeneName,Term) ->
+MQ_data.AmpGl.QC.summary.QC  
+
+
+MQ_data.AmpGl.QC.summary.QC %>% pivot_wider(names_from = c("gland","Part"), values_from = "relativeIntensity", values_fill = 0 )  ->presentInBoth
+
+
+presentInBoths = MQ_data.AmpGl.QC.summary.QC %>%
+  distinct(geneName,gland,Term) %>%
+  group_by(geneName,Term) %>%
+  summarise(n = n()) %>%
+  filter(n == 2)
+
+
+
+presentInBothsGlands = MQ_data.AmpGl.QC.summary.QC %>%
+  filter(Part == "Gland") %>%
+  group_by(geneName) %>%
+  summarise(n = n()) %>%
+  filter(n == 2)
+
+presentOnlyInOneGland = MQ_data.AmpGl.QC.summary.QC %>%
+  filter(Part == "Gland") %>%
+  group_by(geneName) %>%
+  summarise(n = n()) %>%
+  filter(n == 1) %>%
+  ungroup() %>%
+  inner_join(MQ_data.AmpGl.QC.summary.QC) %>%
+  filter(Part == "Gland") %>%
+  arrange(geneName)
+
+presentOnlyInMajorGland= presentOnlyInOneGland %>%
+  filter(gland == "Major") %>%
+  arrange(-relativeIntensity)
+
+presentOnlyInMinorGland= presentOnlyInOneGland %>%
+  filter(gland == "Minor") %>%
+  arrange(-relativeIntensity)
+
+
+
+presentInBothsDope = MQ_data.AmpGl.QC.summary.QC %>%
+  filter(Part == "Dope") %>%
+  group_by(geneName) %>%
+  summarise(n = n()) %>%
+  filter(n == 2)
+
+presentInOneDope = MQ_data.AmpGl.QC.summary.QC %>%
+  filter(Part == "Dope") %>%
+  group_by(geneName) %>%
+  summarise(n = n()) %>%
+  filter(n == 1) %>%
+  inner_join(MQ_data.AmpGl.QC.summary.QC) %>%
+  filter(Part == "Dope") %>%
+  arrange(geneName)
+
+
+presentOnlyInMajorDope= presentInOneDope %>%
+  filter(gland == "Major") %>%
+  arrange(-relativeIntensity)
+
+presentOnlyInMinorDope= presentInOneDope %>%
+  filter(gland == "Minor") %>%
+  arrange(-relativeIntensity)
+
+
+presentOnlyMajorBoth = presentOnlyInMajorGland %>%
+  filter(geneName %in% presentOnlyInMajorDope$geneName)
+
+presentOnlyMinorBoth = presentOnlyInMinorGland %>%
+  filter(geneName %in% presentOnlyInMinorDope$geneName)
+
+
+
+presentInBothsGlands %>% 
+  inner_join(geneInfo) %>% filter(Term == "SpiCE")
+
+```
+
+
+
+# Integrate Minor and Major
+
+## Minor 
+
+```{r}
+
+# Minor data --- you can get this data from: 
+
+filePath = "~/Box/bridgespider/scRNA/Minor_recluster_annot_res.0.15_2.rds"
+sub_Minor_recluster <- readRDS(file = filePath)
+DefaultAssay(sub_Minor_recluster) <- "Recluster"
+sub_Minor_recluster$Batch <- "Minor_B1"
+## add one new column named CellTypes
+celltype <- rep("unsure",ncol(sub_Minor_recluster))
+celltype[sub_Minor_recluster$Re_celltype == "Tail_MiSpabd"] <- "ZoneA_MiSpabd"
+celltype[sub_Minor_recluster$Re_celltype == "Sac_MiSpc"] <- "ZoneB_MiSpc"
+celltype[sub_Minor_recluster$Re_celltype == "Sac_1"] <- "ZoneC_SpICE-LMa1"
+celltype[sub_Minor_recluster$Re_celltype == "Duct_1"] <- "Duct_2"
+celltype[sub_Minor_recluster$Re_celltype == "Duct_2"] <- "Duct_1"
+sub_Minor_recluster <- AddMetaData(sub_Minor_recluster, celltype, col.name = "Latest_CellTypes")
+sub_Minor_recluster$CellTypes <- paste0("Minor_",sub_Minor_recluster$Latest_CellTypes)
+
+
+sub_Minor_recluster$Latest_CellTypes = factor(sub_Minor_recluster$Latest_CellTypes,
+                                              levels = names(scCellOrderColorMinor))
+sub_Minor_recluster = SetIdent(sub_Minor_recluster,value =  "Latest_CellTypes")  
+
+DimPlot(sub_Minor_recluster, cols =scCellOrderColorMinor ) -> minor.dimplot
+minor.dimplot
+
+
+sub_Minor_recluster
+findallmarkers = FindAllMarkers(sub_Minor_recluster, logfc.threshold = 0.25,  min.pct = 0.25, assay = "RNA")
+
+findallmarkers %>% filter(avg_log2FC > 0)
+
+featurePlot = FeaturePlot(sub_Minor_recluster, features = c("MiSpa","MiSpc","MiSpd","SpiCE-LMa1","SpiCE-LMa4","SpiCE-LMa6"), cols = c("lightgrey", "blue"), ncol = 3)
+
+featurePlot = FeaturePlot(sub_Minor_recluster, features = c("smoc1","LASC010012","LASC001730","LASC000038"), cols = c("lightgrey", "blue"), ncol = 2)
+
+library(patchwork)
+(minor.dimplot+plot_spacer())/featurePlot+ plot_layout(heights = c(1,3)) + plot_annotation(tag_levels = 'A') -> minor.dimplots
+
+ggsave("../../results/scRNA/minorGland/MinorDimplots_withGeneExpression.pdf", minor.dimplots, width = 8, height = 10)
+```
+
+## Major
+```{r marker genes}
+#Major data --- you can get this data from: Box/bridgespider/scRNA/LarSco.combined_filtered.integrated.MajorSpecific.SCT.2.rds
+
+major.sct.integrated = readRDS("~/git/Rising-Lab/MajorGland_paper/data/scRNA/majorGland/scRNA.major.integrated.2024.rds")
+
+Major_data <- major.sct.integrated
+DefaultAssay(Major_data) <- "integrated"
+major.sct.integrated = SetIdent(major.sct.integrated,value =  "clusterZones")  
+
+DimPlot(major.sct.integrated, reduction = "umap", cols = scCellOrderColorMajor) -> major.dimplot
+```
+
+## Figure 4
+```{r}
+
+#major.sct.integrated.clean = subset(major.sct.integrated, 
+#                                    cellID %in% major.minor.sct.integrated.clean$cellID)
+
+
+#DimPlot(major.sct.integrated.clean, reduction = "umap", cols = scCellOrderColorMajor) -> major.dimplot.clean
+#DimPlot(major.sct.integrated, reduction = "umap", cols = scCellOrderColorMajor) -> major.dimplot
+library(patchwork)
+
+dimplots = minor.dimplot +major.dimplot + plot_layout(guides = "collect")
+
+#ggsave("figures/figure2/figrure2.dimplots.pdf", plot = dimplots, width = 10 , height = 6)
+
+dimplots
+```
+
+## Integrate data 
+done once
+
+```{r}
+
+if(!file.exists("~/Box/bridgeSpider/scRNA/scRNA.major.minor.integrated.2024.rds")){# load major_minor_data
+Major_Minor_data <- readRDS(file = paste(params$repositoryPath, params$ampullateResultDir, "Major_Minor_data.rds", sep = "/"))
+
+ifnb.list <- SplitObject(Major_Minor_data, split.by = "Batch")
+ifnb.list <- lapply(X = ifnb.list, FUN = SCTransform)
+features <- SelectIntegrationFeatures(object.list = ifnb.list, nfeatures = 3000)
+ifnb.list <- PrepSCTIntegration(object.list = ifnb.list, anchor.features = features)
+
+# normalize and identify variable features for each dataset independently
+immune.anchors <- FindIntegrationAnchors(object.list = ifnb.list, normalization.method = "SCT",
+    anchor.features = features)
+
+
+major.sct.integrated <- IntegrateData(anchorset = immune.anchors, normalization.method = "SCT")
+major.minor.sct.integrated = major.sct.integrated
+
+major.minor.sct.integrated <- RunPCA(major.minor.sct.integrated)
+major.minor.sct.integrated <- RunUMAP(major.minor.sct.integrated, dims = 1:30)
+DimPlot(major.minor.sct.integrated, reduction = "umap", group.by = c("clusterZones", "Latest_CellTypes"))
+
+major.minor.sct.integrated@meta.data$cellID = rownames(major.minor.sct.integrated@meta.data) 
+major.minor.sct.integrated@meta.data %>% select(cellID,clusterZones,Latest_CellTypes) %>%
+  mutate(cellType = Latest_CellTypes) %>%
+  mutate(cellType = replace(cellType, is.na(cellType), 
+                major.minor.sct.integrated@meta.data$clusterZones[which(!is.na(clusterZones))])) %>%
+  select(cellID,cellType) ->md.2
+major.minor.sct.integrated = addMetaDataToSingleCellData(major.minor.sct.integrated,md.2)
+
+major.minor.sct.integrated <- FindNeighbors(major.minor.sct.integrated, dims = 1:20)
+major.minor.sct.integrated <- FindClusters(major.minor.sct.integrated, resolution = 0.1)
+
+major.minor.sct.integrated@meta.data %>%
+  ggplot(aes(x = seurat_clusters,fill= cellType )) + geom_bar()
+
+}
+
+#saveRDS(major.minor.sct.integrated, "~/Box/bridgeSpider/scRNA/scRNA.major.minor.integrated.2024.rds")
+
+
+
+
+
+```
+
+
+
+## Fix metadata
+```{r}
+## Fix the  metaData
+
+major.minor.sct.integrated = readRDS("~/Box/bridgeSpider/scRNA/scRNA.major.minor.integrated.2024.rds")
+
+
+## Removing the small clusters 
+
+major.minor.sct.integrated.clean = subset(major.minor.sct.integrated , seurat_clusters %in%c(0,1,2,3,4,5))
+
+#Clean the metadata  
+MD = major.minor.sct.integrated.clean@meta.data
+
+MD %>% select(c(1:9,11,24,25,29)) %>%
+  mutate(rn = cellID) %>%
+  mutate(CellTypes = gsub("Minor_ZoneC","Minor_ZoneC_SpiCE",CellTypes)) %>%
+  mutate(CellTypes = gsub("Ma_","Major_",CellTypes)) %>%
+  mutate(CellTypes = gsub("ZoneA_SpiCE-LMa3","ZoneA_SpiCE",CellTypes)) %>%
+  mutate(CellTypes = gsub("ZoneC_SpiCE-LMa1","ZoneC_SpiCE",CellTypes))->  
+  MD.clean
+
+# Annotate zones
+MD.clean %>% 
+  mutate(Zone = "ZoneA") %>%
+  mutate(Zone = replace(Zone,seurat_clusters == 1,"Duct" )) %>%
+  mutate(Zone = replace(Zone,seurat_clusters == 2,"ZoneA" )) %>%
+  mutate(Zone = replace(Zone,seurat_clusters == 3,"ZoneC" )) %>%
+  mutate(Zone = replace(Zone,seurat_clusters == 4,"ZoneABC" )) %>%
+  mutate(Zone = replace(Zone,seurat_clusters == 5,"ZoneB" )) ->
+  MD.clean
+
+
+
+# Keep only overlapping annotation
+
+MD.clean %>%
+  filter(Zone == "ZoneA" &
+           CellTypes %in% c("Minor_ZoneA_MiSpabd","Major_ZoneA_MaSp1","Major_ZoneA_MaSp2","Major_ZoneA_SpiCE"))->zoneA
+
+MD.clean %>%
+  filter(Zone == "ZoneB" &
+           CellTypes %in% c("Minor_ZoneB_MiSpc","Major_ZoneB_MaSp3"))->zoneB
+zoneB %>% distinct(CellTypes)
+
+MD.clean %>%
+  filter(Zone == "ZoneC" &
+           CellTypes %in% c("Major_ZoneC_SpiCE","Minor_ZoneC_SpiCE"))->zoneC
+zoneC %>% distinct(CellTypes)
+
+MD.clean %>%
+  filter(Zone == "ZoneABC" &
+           CellTypes %in% c("Major_ZoneABC"))->zoneABC
+
+MD.clean %>%
+  filter(Zone == "Duct" &
+           CellTypes %in% c("Major_Duct_1","Major_Duct_2","Minor_Duct_1","Minor_Duct_2"))->Duct
+
+
+MD.clean = bind_rows(zoneA,zoneB,zoneABC,zoneC,Duct) %>%
+  mutate(GlandType = replace(GlandType, is.na(GlandType),"Major"))
+
+
+major.minor.sct.integrated.clean = subset(major.minor.sct.integrated.clean, cellID %in% c(MD.clean$cellID))
+
+MD.clean = MD.clean[rownames(major.minor.sct.integrated.clean@meta.data),]
+
+major.minor.sct.integrated.clean@meta.data = MD.clean
+
+```
+
+```{r }
+
+
+
+major.minor.sct.integrated.clean$CellTypes = factor(major.minor.sct.integrated.clean$CellTypes,
+                                                    levels = names(scCellCelltypeOrderColorBoth))
+
+DimPlot(major.minor.sct.integrated.clean, reduction = "umap",group.by = "CellTypes",cols = scCellCelltypeOrderColorBoth)
+
+DimPlot(major.minor.sct.integrated.clean, reduction = "umap",group.by = "CellTypes",cols = scCellCelltypeOrderColorBoth, split.by = "GlandType")
+
+
+
+
+major.minor.sct.integrated.clean$Zone = factor(major.minor.sct.integrated.clean$Zone,levels = names(scCellZoneOrderColorBoth))
+major.minor.sct.integrated@meta.data %>%
+  ggplot(aes(x = Zone,fill= CellTypes )) + geom_bar() +  scale_fill_manual(values = scCellCelltypeOrderColorBoth) -> before
+
+major.minor.sct.integrated.clean$Zone = factor(major.minor.sct.integrated.clean$Zone,levels = names(scCellZoneOrderColorBoth))
+major.minor.sct.integrated.clean@meta.data %>%
+  ggplot(aes(x = Zone,fill= CellTypes )) + geom_bar() +  scale_fill_manual(values = scCellCelltypeOrderColorBoth) -> after
+
+
+#before + after + plot_layout(guides = "collect")
+DimPlot(major.minor.sct.integrated.clean, reduction = "umap",
+        group.by = "CellTypes",
+        cols = scCellCelltypeOrderColorBoth)
+
+
+DimPlot(major.minor.sct.integrated.clean, reduction = "umap",
+        group.by = "Zone",
+        cols = scCellZoneOrderColorBoth)
+
+DimPlot(major.minor.sct.integrated, reduction = "umap",group.by = "CellTypes",cols = scCellCelltypeOrderColorBoth) -> before.dimplot
+
+DimPlot(major.minor.sct.integrated.clean, reduction = "umap",group.by = "CellTypes",cols = scCellCelltypeOrderColorBoth) -> after.dimplot
+
+before.dimplot+after.dimplot+ plot_layout(guides = "collect")
+
+after.dimplot 
+DimPlot(major.minor.sct.integrated.clean, reduction = "umap",group.by = "CellTypes",cols = scCellCelltypeOrderColorBoth, split.by = "GlandType") -> split.dimplot
+
+colors = brewer.pal(n = 8, name = "Dark2")
+NewClusters = DimPlot(major.minor.sct.integrated, cols =colors, label = TRUE )
+major.minor.sct.integrated.clean
+
+major.minor.sct.integrated@meta.data %>%
+  ggplot(aes(x = seurat_clusters,fill= CellTypes )) + geom_bar() + scale_fill_manual(values = scCellCelltypeOrderColorBoth) -> barplot.clusters
+
+
+major.minor.sct.integrated.clean@meta.data
+
+"AAABBB
+AAABBB
+CCCCCC
+CCCCCC"->layout
+
+firstPlot = NewClusters+barplot.clusters+ split.dimplot + plot_layout(guides = "collect",design = layout)+ plot_annotation(tag_levels = 'A')
+ 
+ ggsave("figures/figure4/DimPlot.pdf",firstPlot)
+
+```
+
+
+
+## Plot 27 bulk DE genes
+```{r}
+
+geneInfo$geneNameProtein
+
+features = data.frame(geneNameProtein = c("MiSpa","MiSpb","MiSpc","MiSpd",
+             "SpiCE-LMa1","SpiCE-LMa2","SpiCE-LMa3","SpiCE-LMa4","SpiCE-LMa5","SpiCE-LMa6",
+             "AmSp-like1","AmSp-like2",
+             "MaSp1a","MaSp1b","MaSp2a","MaSp2b","MaSp3")) %>%
+  inner_join(geneInfo)
+
+
+
+```
+
+
+
+# Marker genes 
+
+```{r}
+
+
+markerGenes.minor =
+  read_csv("../../annotation/scRNA/Minor/Markers.integrated.minorCluster.all.2024.csv.gz") %>%
+  mutate(cluster = replace(cluster,cluster =="ZoneC" ,"ZoneC_SpiCE" ))  %>% 
+  mutate(gland = "Minor") %>%
+  group_by(scGeneName) %>%
+  arrange(p_val_adj , -avg_log2FC) %>%
+  slice_head(n = 1) %>%
+  ungroup() %>%
+  group_by(cluster) %>%
+  arrange(p_val_adj , -avg_log2FC) %>%
+  select(scGeneName,cluster,gland, p_val_adj, avg_log2FC,pct.1, pct.2 )
+
+
+markerGenes.minor %>% inner_join(geneInfo) %>% filter(Term == "SpiCE")
+markerGenes.minor %>% inner_join(geneInfo) %>%
+  select(cluster,geneNameProtein) %>%
+  inner_join(minor.parts.PCA.loading) %>%
+  pivot_longer(names_to = "PCs", values_to = "loading", c(PC1,PC2)) %>%
+  ggplot(aes(PCs,loading,fill = cluster))+
+  geom_boxplot()+
+  theme_minimal()+ 
+  scale_fill_manual(values = scCellOrderColorMinor)-> 
+  scRNA.PCA.loading.plot
+
+
+markerGenes.minor %>% inner_join(geneInfo) %>% 
+  filter(geneNameProtein %in% c("MiSpa","MiSpb","MiSpc","MiSpd",                              "SpiCE-LMa1","SpiCE-LMa4","SpiCE-LMa6"))%>%
+  select(cluster,geneNameProtein) %>%
+  inner_join(minor.parts.PCA.loading) %>%
+  mutate(cluster = factor(cluster,levels = names(scCellOrderColorMinor)))->
+  markerGenes
+
+library(ggrepel)
+
+markerGenes.minor %>% inner_join(geneInfo) %>%
+  select(cluster,geneNameProtein) %>%
+  inner_join(minor.parts.PCA.loading) %>%
+  mutate(cluster = factor(cluster,levels = names(scCellOrderColorMinor))) %>%
+  ggplot(aes(PC1,PC2,fill = cluster, label = geneNameProtein))+
+  geom_point(alpha = 0.5,size = 10, shape = 22)+
+  geom_point(data = markerGenes,alpha = 1,size = 20, shape = 22)+
+  geom_text(data = markerGenes) +
+  theme_classic()+
+  theme(
+    text = element_text(size = 50)  # Increase overall text size
+  )  +
+  scale_color_manual(values = scCellOrderColorMinor)+
+  scale_fill_manual(values = scCellOrderColorMinor)-> scRNA.PCA.loading.plot.2d
+
+markerGenes.minor %>% inner_join(geneInfo) %>%
+  select(cluster,geneNameProtein) %>%
+  inner_join(minor.parts.PCA.loading) %>%
+  mutate(cluster = factor(cluster,levels = names(scCellOrderColorMinor))) %>%
+  ggplot(aes(PC1,PC2,fill = cluster, label = geneNameProtein))+
+  geom_point(alpha = 0.7,size = 10, shape = 22)+
+  geom_text_repel(data = markerGenes) 
+
+
+DEseq.minor.parts.location  %>%
+  inner_join(minor.parts.PCA.loading) %>%
+  mutate(Tissue = gsub("TailProximal","Tail_proximal",Tissue)) %>%
+  ggplot(aes(PC1,PC2,color = Tissue))+ geom_point(alpha = 0.7,size = 10)+
+  theme_classic()+
+  scale_color_manual(values = BulkPartMinor2)+
+  theme(
+    text = element_text(size = 50)  # Increase overall text size
+  )  ->
+  bulk.PCA.loading.plot.2d
+
+DEseq.minor.parts.location%>%
+  inner_join(minor.parts.PCA.loading)%>%
+  mutate(Tissue = gsub("TailProximal","Tail_proximal",Tissue)) %>%
+  mutate(Tissue = factor(Tissue, levels = names(BulkPartMinor2))) %>%
+  pivot_longer(names_to = "PCs", values_to = "loading", c(PC1,PC2)) %>%
+  ggplot(aes(PCs,loading,fill = Tissue))+ 
+  geom_boxplot()+
+  theme_classic()+
+  scale_fill_manual(values = BulkPartMinor2) -> bulk.PCA.loading.plot
+
+
+minor.parts.PCA%>%
+  mutate(Tissue = gsub("Sac_distal_Duct","Duct",Tissue)) %>%
+  ggplot(aes(PC1,PC2,fill = Tissue))+
+  geom_point(size = 10, shape = 23)+
+  theme_classic()+
+  scale_color_manual(values = BulkPartMinor2)+
+  scale_fill_manual(values = BulkPartMinor2)+
+theme(
+    text = element_text(size = 50)  # Increase overall text size
+  ) ->
+  bulk.PCA.plot.2d
+
+
+
+
+scRNA.PCA.loading.plot /bulk.PCA.loading.plot
+
+bulk.PCA.plot.2d  + scRNA.PCA.loading.plot.2d + plot_layout(guides = "collect")
+
+ggsave("~/Google Drive/My Drive/Minor gland/paper2/figures_new/figure4/Figure4D.PCA.plots.pdf", width=30, height = 10 )
+
+
+
+markerGenes.minor %>% 
+  filter(cluster == "ZoneC_SpICE-LMa1") %>%
+  arrange(p_val_adj , -avg_log2FC) ->
+  zoneC_markers
+
+
+markerGenes.minor %>% 
+  filter(grepl("ZoneB",cluster)) %>%
+  arrange(p_val_adj , -avg_log2FC)->
+  zoneB_markers
+
+geneInfo %>%
+  filter(scGeneName %in% zoneB_markers$scGeneName) %>%
+  inner_join(zoneB_markers) %>%
+  arrange(p_val_adj , -avg_log2FC)
+
+
+geneInfo %>%
+  filter(scGeneName %in% zoneC_markers$scGeneName) %>%
+  inner_join(zoneC_markers) %>%
+  arrange(p_val_adj , -avg_log2FC) %>% 
+  filter(signalP == "Yes")
+
+
+```
+
+
+## Minor major independent
+```{r}
+
+
+
+markerGenes.minor =
+  read_csv("../../annotation/scRNA/Minor/Markers.integrated.minorCluster.all.2024.csv.gz")%>%
+  mutate(gland = "Minor") %>%
+  group_by(cluster) %>% 
+  arrange(p_val_adj , -avg_log2FC) %>%
+  select(scGeneName,cluster,gland, p_val_adj, avg_log2FC,pct.1, pct.2 )
+
+markerGenes.minor %>%
+  inner_join(geneInfo) %>%
+  filter(signalP == "Yes") %>%
+  mutate(cluster = factor(cluster, levels = names(scCellOrderColorMinor))) %>%
+select(geneNameProtein, cluster,gland, p_val_adj, avg_log2FC,pct.1, pct.2) %>%
+  arrange(cluster, p_val_adj , -avg_log2FC) ->
+  supp.table.5
+  write_csv(supp.table.5, file = "~/Google Drive/My Drive/Jobb/Minor gland/paper2/supplementary/tables/Suppl.table.5.csv" )
+
+
+markerGenes.major =
+  read_csv("../../annotation/scRNA/Major/Markers.SCT.integrated.majorCluster.all.2024.csv.gz")%>%
+  mutate(gland = "Major") %>%
+  group_by(cluster) %>% 
+  arrange(p_val_adj , -avg_log2FC) %>%
+  select(scGeneName,cluster,gland, p_val_adj, avg_log2FC,pct.1, pct.2 )
+
+markerGenes.major %>%
+  inner_join(geneInfo) %>%
+  filter(signalP == "Yes") %>%
+  mutate(cluster = factor(cluster, levels = rev(names(scCellOrderColorMajor)))) %>%
+select(geneNameProtein, cluster,gland, p_val_adj, avg_log2FC,pct.1, pct.2) %>%
+  arrange(cluster, p_val_adj , -avg_log2FC) ->
+  supp.table.6
+  write_csv(supp.table.6, file = "~/Google Drive/My Drive/Jobb/Minor gland/paper2/supplementary/tables/Suppl.table.6.csv" )
+
+  
+
+
+markerGenes = bind_rows(markerGenes.major,markerGenes.minor) 
+
+
+markerGenes %>%
+  group_by(scGeneName, gland) %>%
+  summarise(present = n()) %>%
+  group_by(scGeneName) %>%
+  summarise(n = n()) %>%
+  mutate(type = "Common") %>%
+  mutate(type = replace(type, n == 1, "Unique"))  %>%
+  select(scGeneName,type) %>% 
+  inner_join(markerGenes) %>%
+  mutate(zone = "Duct") %>%
+  mutate(zone = replace(zone, grepl("ZoneA",cluster),"ZoneA")) %>%
+  mutate(zone = replace(zone, grepl("ZoneB",cluster),"ZoneB")) %>%
+  mutate(zone = replace(zone, grepl("ZoneC",cluster),"ZoneC")) %>%
+  mutate(zone = replace(zone, grepl("ZoneABC",cluster),"ZoneABC")) %>%
+  mutate(cluster = gsub("ZoneA_SpiCE-LMa3","ZoneA_SpiCE",cluster)) %>%
+  mutate(cluster = gsub("ZoneC_SpiCE-LMa1","ZoneC_SpiCE",cluster)) %>%
+  mutate(cluster = gsub("ZoneC_SpICE-LMa1","ZoneC_SpiCE",cluster))->
+  markerGenes.ind
+
+markerGenes.ind %>% distinct(cluster,gland,zone) ->
+  cluster_zone.association
+
+
+markerGenes %>% group_by(scGeneName) %>% arrange(p_val_adj,-avg_log2FC) %>%
+  slice_head(n = 1) %>%
+  select(scGeneName,cluster,gland)%>%
+  mutate(clusterlong = cluster) %>%
+  mutate(cluster = gsub("ZoneA_SpiCE-LMa3","ZoneA_SpiCE",cluster)) %>%
+  mutate(cluster = gsub("ZoneC_SpiCE-LMa1","ZoneC_SpiCE",cluster)) %>%
+  mutate(cluster = gsub("ZoneC_SpICE-LMa1","ZoneC_SpiCE",cluster)) %>%
+  left_join(cluster_zone.association) %>%
+  ungroup()-> 
+  markerGenes.association
+
+markerGenes %>%
+  select(scGeneName,cluster,gland)%>%
+  mutate(clusterlong = cluster) %>%
+  mutate(cluster = gsub("ZoneA_SpiCE-LMa3","ZoneA_SpiCE",cluster)) %>%
+  mutate(cluster = gsub("ZoneC_SpiCE-LMa1","ZoneC_SpiCE",cluster)) %>%
+  mutate(cluster = gsub("ZoneC_SpICE-LMa1","ZoneC_SpiCE",cluster)) %>%
+  left_join(cluster_zone.association) %>%
+  ungroup()-> 
+  markerGenes.all.association
+
+markerGenes.all.association %>% inner_join(geneInfo) %>%
+  distinct(geneNameProtein,cluster,gland,zone) %>% 
+  mutate(glandzone = paste(gland,zone,sep = "_"))->
+  markerGenes.all.association
+
+markerGenes.all.association %>% 
+  mutate(present = 1) %>%
+  distinct(geneNameProtein, glandzone,present) %>%
+  pivot_wider(names_from ="glandzone",
+              values_from = "present",
+              values_fill = 0 ) %>%
+  column_to_rownames("geneNameProtein")->
+  markerGenes.all.wide
+
+
+```
+
+
+
+
+
+
+### Common
+```{r }
+
+markerGenes.ind %>%
+  filter(type == "Common") %>%
+  inner_join(geneInfo)->
+  markerGenes.ind.com
+
+markerGenes.ind.com %>%
+  ungroup() %>%
+  group_by(scGeneName,gland,zone ) %>%
+  arrange(p_val_adj,-avg_log2FC) %>%
+  slice_head(n = 1) %>%
+    ungroup() ->
+  markerGenes.ind.com
+
+markerGenes.ind.com %>%
+  mutate(present = 1) %>%
+  mutate(zone2 = paste(gland,zone,sep = "_")) %>%
+  mutate(zone3 = paste(gland,cluster,sep = "_")) %>%
+  ungroup() ->
+  markerGenes.ins.HM 
+
+
+markerGenes.ins.HM %>%
+  select(scGeneName,zone2,present ) %>%
+  pivot_wider(names_from = "zone2", values_from = "present", values_fill = 0) %>%
+  column_to_rownames(var = "scGeneName")->
+markerGenes.ind.com
+
+markerGenes.ins.HM %>%
+  select(scGeneName,zone2,zone3 ) %>%
+  pivot_wider(names_from = "zone2", values_from = "zone3", values_fill = "No") %>%
+  column_to_rownames(var = "scGeneName")->
+markerGenes.ind.names
+
+library(cluster)
+gower.dist <- daisy(t(markerGenes.ind.com),metric = "manhattan")  
+aggl.clust.c <- hclust(gower.dist, method = "ward")
+plot(aggl.clust.c)
+
+gower.dist.genes <- daisy((markerGenes.ind.com),metric = "manhattan")  
+aggl.clust.genes <- hclust(gower.dist.genes, method = "ward")
+plot(aggl.clust.genes, main = "Hierarchical Clustering Dendrogram", sub = "", xlab = "Samples", ylab = "Height")
+
+
+
+
+ComplexHeatmap::Heatmap(markerGenes.ind.names,
+                        cluster_columns = aggl.clust.c ,
+                        col = scCellCelltypeOrderColorBoth,
+                        rect_gp = gpar(col = "white", lwd = 0.1),
+                        show_row_names = FALSE,
+                        cluster_rows = aggl.clust.genes,
+                        column_split = 5,split = 4) -> heatmap
+
+
+pdf("~/Google Drive/My Drive/Minor gland/paper2/figures_new/figure4/Figure4B.common.markerGenes.plots.pdf",height = 4, width = 4)
+  heatmap
+dev.off()
+
+
+
+
+```
+
+### Uniuqe    
+```{r }
+
+markerGenes.ind %>%
+  filter(type != "Common") %>%
+  inner_join(geneInfo)->
+  markerGenes.ind.uni
+
+markerGenes.ind.uni %>%
+  ungroup() %>%
+  group_by(scGeneName,gland,zone ) %>%
+  arrange(p_val_adj,-avg_log2FC) %>%
+  slice_head(n = 1) %>%
+    ungroup() ->
+  markerGenes.ind.uni
+
+
+markerGenes.ind.uni %>%
+  group_by(gland, zone) %>%
+  arrange(gland,zone, p_val_adj,-avg_log2FC)  %>%
+  filter(zone != "Duct") %>%
+  filter(zone != "ZoneABC") 
+
+
+```
+
+
+## Minor major together
+
+
+### Genes found independetly
+```{r}
+markerGenes.major.all =
+  read_csv("../../annotation/scRNA/Major/Markers.SCT.integrated.majorCluster.all.2024.csv.gz")%>%
+  mutate(gland = "Major") %>%
+  select(scGeneName,cluster,gland, p_val_adj, avg_log2FC,pct.1, pct.2 ) %>%
+  filter(cluster %in% c("ZoneA_MaSp2","ZoneA_MaSp1",
+                        "ZoneA_SpiCE-LMa3","ZoneB_MaSp3",
+                        "ZoneC_SpiCE-LMa1")) 
+
+
+
+markerGenes.minor.all =
+  read_csv("../../annotation/scRNA/Minor/Markers.integrated.minorCluster.all.2024.csv.gz") %>%
+  mutate(cluster = replace(cluster,cluster =="ZoneC" ,"ZoneC_SpiCE" ))  %>% 
+  mutate(gland = "Minor") %>%
+  select(scGeneName,cluster,gland, p_val_adj, avg_log2FC,pct.1, pct.2 )%>%
+  filter(cluster %in% c("ZoneA_MiSpabd","ZoneA_MaSp1",
+                        "ZoneA_SpiCE-LMa3","ZoneB_MiSpc",
+                        "ZoneC_SpICE-LMa1")) 
+
+
+
+
+```
+
+###Common Zone
+
+```{r}
+
+
+MD.clean = major.minor.sct.integrated.clean@meta.data 
+
+MD.clean%>%
+  ggplot(aes(x = Zone,fill= CellTypes )) + geom_bar() + facet_wrap(.~GlandType) + scale_fill_manual(values = scCellCelltypeOrderColorBoth)
+
+
+#seeds = sample.int(1000, 10)
+seeds =c(58, 83, 54, 68, 53,  4, 71, 11, 75, 90)
+
+results.common = list()
+for(i in 1:10){
+  set.seed(seeds[i])
+MD.clean %>% group_by(GlandType,Zone) %>%
+  slice_sample(n = 300,replace = FALSE) %>%
+  filter( Zone %in% c("ZoneA","ZoneB","ZoneC")) -> 
+  MD.clean.sub
+
+
+major.minor.sct.integrated.clean.sub = subset(major.minor.sct.integrated.clean, cellID %in% c(MD.clean.sub$cellID))
+
+major.minor.sct.integrated.clean.sub = SetIdent(major.minor.sct.integrated.clean.sub,value =  "Zone")  
+
+
+major.minor.sct.integrated.clean.sub.sct = PrepSCTFindMarkers(major.minor.sct.integrated.clean.sub)
+markerGenes.integrated.both.Zones.sct = FindAllMarkers(major.minor.sct.integrated.clean.sub.sct, logfc.threshold = 1 , only.pos = FALSE,assay = "SCT") 
+markerGenes.integrated.both.Zones.sct$run = i
+
+results.common[[i]] = markerGenes.integrated.both.Zones.sct
+
+}
+
+
+bind_rows(results.common) %>%
+  dplyr::filter(gene %in% markerGenes.major.all$scGeneName) %>%
+  dplyr::filter(gene %in% markerGenes.minor.all$scGeneName) %>%
+  dplyr::filter(avg_log2FC  > 1) %>%
+  dplyr::rename(scGeneName = "gene") %>%
+  inner_join(geneInfo)-> common.sct.10
+
+common.sct.10 %>% distinct(scGeneName,run) %>%
+  group_by(scGeneName) %>%
+  summarise(n = n()) %>%
+  filter(n >5) ->common.sct.10.found10
+  
+
+common.sct.10 %>% distinct(scGeneName,run) %>%
+  group_by(scGeneName) %>%
+  summarise(n = n())->common.sct.10.found10
+  
+
+
+markerGenes.integrated.both.Zones.sct %>%
+  filter(gene %in% markerGenes.major.all$scGeneName) %>%
+  filter(gene %in% markerGenes.minor.all$scGeneName) %>%
+  filter(avg_log2FC  > 1) %>%
+  rename(scGeneName = "gene") %>%
+  inner_join(geneInfo) -> common.sct
+
+
+
+markerGenes.integrated.both.Zones.sct %>%
+  filter(gene %in% markerGenes.major.all$scGeneName) %>%
+  filter(gene %in% markerGenes.minor.all$scGeneName) %>%
+  filter(avg_log2FC  > 1) %>% arrange(gene)
+
+common.sct %>%
+  inner_join(presentInBothsGlands) %>%
+  filter(signalP == "Yes") ->
+  common.sct.sp.prot
+
+
+
+common.sct.sp.prot %>% select (geneNameProtein, cluster) -> common.short
+
+
+common.sct %>% arrange(scGeneName)
+
+full_join(common.sct.sp.prot,DEseq.common.27 , by = "geneNameProtein") %>%
+  select(geneNameProtein, cluster, Tissue)
+  arrange(-n, scGeneName) ->
+  common.sct.final
+```
+
+
+### Unique Zone
+
+#### ZoneA
+
+```{r}
+
+major.minor.sct.integrated.clean.zoneA = subset(major.minor.sct.integrated.clean, Zone == "ZoneA")
+
+DefaultAssay(major.minor.sct.integrated.clean.zoneA) <- "RNA"
+major.minor.sct.integrated.clean.zoneA@meta.data %>%
+  group_by(CellTypes) %>%
+  slice_sample(n = 1000)->
+  MD.sampled
+  
+major.minor.sct.integrated.clean.zoneA = subset(major.minor.sct.integrated.clean.zoneA,
+                                                cellID %in% MD.sampled$cellID)
+
+ifnb.list <- SplitObject(major.minor.sct.integrated.clean.zoneA, split.by = "orig.ident")
+ifnb.list <- lapply(X = ifnb.list, FUN = SCTransform)
+features <- SelectIntegrationFeatures(object.list = ifnb.list, nfeatures = 3000)
+ifnb.list <- PrepSCTIntegration(object.list = ifnb.list, anchor.features = features)
+
+# normalize and identify variable features for each dataset independently
+immune.anchors <- FindIntegrationAnchors(object.list = ifnb.list, normalization.method = "SCT",
+    anchor.features = features)
+
+
+zoneA.sct.integrated <- IntegrateData(anchorset = immune.anchors, normalization.method = "SCT")
+
+zoneA.sct.integrated <- RunPCA(zoneA.sct.integrated)
+zoneA.sct.integrated <- RunUMAP(zoneA.sct.integrated, dims = 1:30)
+
+zoneA.sct.integrated <- FindNeighbors(zoneA.sct.integrated, dims = 1:20)
+zoneA.sct.integrated <- FindClusters(zoneA.sct.integrated, resolution = 0.3)
+
+zoneA.sct.integrated@meta.data %>%
+  ggplot(aes(x = seurat_clusters,fill= CellTypes )) + geom_bar()
+
+DimPlot(zoneA.sct.integrated, reduction = "umap", group.by = "CellTypes", split.by = "CellTypes", ncol = 2)
+DimPlot(zoneA.sct.integrated, reduction = "umap")
+
+
+library(Seurat)
+Seurat::SetIdent(zoneA.sct.integrated, value = "GlandType")
+zoneA.sct.integrated.sct = PrepSCTFindMarkers(zoneA.sct.integrated)
+
+zoneAmarkers = Seurat::FindAllMarkers(zoneA.sct.integrated.sct, only.pos = TRUE, logfc.threshold = 0.25, min.pct = 0.25, assay = "SCT", group.by = "GlandType")
+
+
+```
+
+#### ZoneB
+
+
+```{r}
+
+major.minor.sct.integrated.clean.zoneB = subset(major.minor.sct.integrated.clean, Zone == "ZoneB")
+
+DefaultAssay(major.minor.sct.integrated.clean.zoneB) <- "RNA"
+
+ifnb.list <- SplitObject(major.minor.sct.integrated.clean.zoneB, split.by = "GlandType")
+ifnb.list <- lapply(X = ifnb.list, FUN = SCTransform)
+features <- SelectIntegrationFeatures(object.list = ifnb.list, nfeatures = 3000)
+ifnb.list <- PrepSCTIntegration(object.list = ifnb.list, anchor.features = features)
+
+# normalize and identify variable features for each dataset independently
+immune.anchors <- FindIntegrationAnchors(object.list = ifnb.list, normalization.method = "SCT",
+    anchor.features = features)
+
+
+zoneB.sct.integrated <- IntegrateData(anchorset = immune.anchors, normalization.method = "SCT")
+
+zoneB.sct.integrated <- RunPCA(zoneB.sct.integrated)
+zoneB.sct.integrated <- RunUMAP(zoneB.sct.integrated, dims = 1:30)
+
+zoneB.sct.integrated <- FindNeighbors(zoneB.sct.integrated, dims = 1:20)
+zoneB.sct.integrated <- FindClusters(zoneB.sct.integrated, resolution = 0.3)
+
+zoneB.sct.integrated@meta.data %>%
+  ggplot(aes(x = seurat_clusters,fill= CellTypes )) + geom_bar()
+
+DimPlot(zoneB.sct.integrated, reduction = "umap", group.by = "CellTypes", split.by = "CellTypes", ncol = 2)
+DimPlot(zoneB.sct.integrated, reduction = "umap")
+
+
+library(Seurat)
+Seurat::SetIdent(zoneB.sct.integrated, value = "GlandType")
+
+zoneB.sct.integrated.sct = PrepSCTFindMarkers(zoneB.sct.integrated)
+zoneBmarkers = Seurat::FindAllMarkers(zoneB.sct.integrated.sct, only.pos = TRUE, logfc.threshold = 0.25, min.pct = 0.25, assay = "SCT", group.by = "GlandType")
+
+
+
+```
+
+#### ZoneC
+
+
+```{r}
+
+major.minor.sct.integrated.clean.ZoneC = subset(major.minor.sct.integrated.clean, Zone == "ZoneC")
+
+DefaultAssay(major.minor.sct.integrated.clean.ZoneC) <- "RNA"
+
+ifnb.list <- SplitObject(major.minor.sct.integrated.clean.ZoneC, split.by = "GlandType")
+ifnb.list <- lapply(X = ifnb.list, FUN = SCTransform)
+features <- SelectIntegrationFeatures(object.list = ifnb.list, nfeatures = 3000)
+ifnb.list <- PrepSCTIntegration(object.list = ifnb.list, anchor.features = features)
+
+# normalize and identify variable features for each dataset independently
+immune.anchors <- FindIntegrationAnchors(object.list = ifnb.list, normalization.method = "SCT",
+    anchor.features = features)
+
+
+ZoneC.sct.integrated <- IntegrateData(anchorset = immune.anchors, normalization.method = "SCT")
+
+ZoneC.sct.integrated <- RunPCA(ZoneC.sct.integrated)
+ZoneC.sct.integrated <- RunUMAP(ZoneC.sct.integrated, dims = 1:30)
+
+ZoneC.sct.integrated <- FindNeighbors(ZoneC.sct.integrated, dims = 1:20)
+ZoneC.sct.integrated <- FindClusters(ZoneC.sct.integrated, resolution = 0.3)
+
+ZoneC.sct.integrated@meta.data %>%
+  ggplot(aes(x = seurat_clusters,fill= CellTypes )) + geom_bar()
+
+DimPlot(ZoneC.sct.integrated, reduction = "umap", group.by = "CellTypes", split.by = "CellTypes", ncol = 2)
+DimPlot(ZoneC.sct.integrated, reduction = "umap")
+
+
+Seurat::SetIdent(ZoneC.sct.integrated, value = "GlandType")
+
+zoneC.sct.integrated.sct = PrepSCTFindMarkers(ZoneC.sct.integrated)
+zoneCmarkers = Seurat::FindAllMarkers(zoneC.sct.integrated.sct, only.pos = TRUE, logfc.threshold = 0.25, min.pct = 0.25, assay = "SCT", group.by = "GlandType")
+
+```
+
+
+#### Combine the three zones
+```{r }
+
+
+bind_rows(zoneAmarkers,
+          zoneBmarkers,
+          zoneCmarkers) %>%
+  rename(scGeneName = "gene") %>% inner_join(geneInfo) ->
+  uniqueMarkers
+
+
+## Filter to keep only the best
+uniqueMarkers %>% 
+  filter(signalP == "Yes") %>%
+  filter(geneName %in% MQ_data.AmpGl.QC.summary.QC$geneName) %>% 
+  filter(avg_log2FC > 5) ->
+  uniqueMarkers.sp.prot.sig
+
+
+# Major
+uniqueMarkers.sp.prot.sig %>% filter(cluster == "Major") ->
+  uniqueMarkers.sp.prot.major.sig
+
+markerGenes.major.all %>%
+  filter(scGeneName %in% uniqueMarkers.sp.prot.major.sig$scGeneName) %>%
+  group_by(scGeneName) %>%
+  arrange(p_val_adj,-avg_log2FC) %>%
+  slice_head(n = 1) %>%
+  arrange(cluster,-avg_log2FC) %>%
+    inner_join(geneInfo) ->
+  zones.unique.sp.prot.major
+
+# Minor
+
+uniqueMarkers.sp.prot.sig %>% filter(cluster == "Minor") ->
+  uniqueMarkers.sp.prot.minor.sig
+
+
+markerGenes.minor.all %>%
+  filter(scGeneName %in% uniqueMarkers.sp.prot.minor.sig$scGeneName) %>%
+  group_by(scGeneName) %>%
+  arrange(p_val_adj,-avg_log2FC) %>%
+  slice_head(n = 1) %>%
+  arrange(cluster,-avg_log2FC) %>%
+    inner_join(geneInfo) ->
+  zones.unique.sp.prot.minor
+
+# Combine
+bind_rows(zones.unique.sp.prot.minor,zones.unique.sp.prot.major) %>%
+  select(scGeneName,cluster,gland,geneNameProtein,signalP) %>%
+  rename(CellTypes = "cluster")->
+  uniqueMarkers.sp.prot.sig.genes
+
+
+uniqueMarkers.sp.prot.sig.genes %>% select(geneNameProtein, GlandType, Zone ) ->
+  unique.short
+
+
+
+```
+
+### Final list of genes for figure 7
+```{r}
+
+## Arrange metadata
+MD.clean %>% distinct(GlandType,CellTypes,Zone) %>%
+  mutate(CellTypes = gsub("_","-",CellTypes)) %>%
+  mutate(glandZone = paste(GlandType, Zone, sep = "_")) %>%
+  mutate(GlandType = factor(GlandType, levels = c("Minor","Major"))) %>%
+  arrange(Zone,GlandType)->Celltypes.info
+
+Celltypes.info %>%arrange(Zone,GlandType) %>%
+  group_by(Zone, GlandType) %>% slice_head(n = 1) %>%
+  ungroup() %>%
+  select(glandZone) -> glandZoneOrder
+
+Celltypes.info %>%  
+  mutate(glandZone = factor(glandZone, levels = glandZoneOrder$glandZone)) ->Celltypes.info  
+
+
+
+# Unique genes
+uniqueMarkers.sp.prot.sig.genes %>%
+  mutate(CellTypes = paste(gland,CellTypes,sep = "-")) %>%
+  mutate(CellTypes = gsub("-LMa1","",CellTypes)) %>%
+  mutate(CellTypes = gsub("-LMa3","",CellTypes)) %>%
+  mutate(CellTypes = gsub("SpICE","SpiCE",CellTypes)) %>%
+  mutate(CellTypes = gsub("_","-",CellTypes)) %>%
+  inner_join(Celltypes.info) ->
+  uniqueMarkers.sp.prot.sig.genes
+
+
+go = data.frame(scGeneName = c("MiSpa","MiSpb","MiSpd",
+  "MaSp1a","MaSp1b","MaSp1c",
+  "MaSp2a","MaSp2b","MaSp2c","MaSp2e","MaSp2f",
+  "Spice-8",
+  "MiSpc","MaSp3a","MaSp3b",
+  "sp-1339#prd34368.1-3","LASC010012",
+  "LASC004595","LASC010016","LASC013229"), 
+  geneOrder = c("MiSpa","MiSpb","MiSpd",
+  "MaSp1a","MaSp1b","MaSp1c",
+  "MaSp2a","MaSp2b","MaSp2c","MaSp2e","MaSp2f",
+  "SpiCE-LMa5",
+  "MiSpc","MaSp3a","MaSp3b",
+  "sp-1339#prd34368.1_3","LASC010012",
+  "LASC004595","LASC010016","SpiCE-LMa1")) %>%
+  mutate(geneOrder = factor(geneOrder,levels = c("MiSpa","MiSpb","MiSpd",
+  "MaSp1a","MaSp1b","MaSp1c",
+  "MaSp2a","MaSp2b","MaSp2c","MaSp2e","MaSp2f",
+  "SpiCE-LMa5",
+  "MiSpc","MaSp3a","MaSp3b",
+  "sp-1339#prd34368.1_3","LASC010012",
+  "LASC004595","LASC010016","SpiCE-LMa1")))  %>%
+  arrange(geneOrder)
+
+
+
+go %>% inner_join(uniqueMarkers.sp.prot.sig.genes) ->
+  uniqueMarkers.sp.prot.sig.genes
+
+
+
+# Common genes
+
+common.sct.sp.prot %>% 
+  rename(Zone = "cluster") %>% 
+  select(scGeneName,geneNameProtein,Zone,signalP,Term) ->
+  common.sct.sp.prot.sig.genes
+  
+
+full_join(common.sct.sp.prot.sig.genes,unique.short) %>%
+  full_join(DEseq.common.27)
+
+  
+DEseq.common.27 %>% select(geneNameProtein, Tissue) %>%
+  rename(BulkRNA_Tissue = "Tissue") %>%
+  ->
+  finalList.bulk
+
+common.sct.sp.prot.sig.genes %>%
+  select(geneNameProtein, Zone) %>%
+  mutate(common = "Yes") ->
+  finalList.common
+
+unique.short %>%
+  select(geneNameProtein, GlandType, Zone) %>%
+  rename(unique = "GlandType") ->
+  finalList.unique
+
+full_join(finalList.common,finalList.unique) %>%
+  full_join(finalList.bulk) %>%
+  arrange(Zone,common,unique,geneNameProtein)->
+  finalList.genes
+
+
+finalList.genes %>% filter(bulk == "Yes") %>%
+  filter(common == "Yes" ) %>%
+  arrange(common, Zone)->
+  finalList.genes.common
+
+finalList.genes %>% filter(!is.na(Zone) |!is.na(GlandType)) ->
+  finalList.genes.scrna
+  
+
+
+png(
+  filename = "My_Styled_Table.png",
+  width = 700,
+  height = 500
+)
+
+# Use ttheme_minimal for a cleaner style and adjust text size
+styled_grob <- tableGrob(
+  data_to_print,
+  rows = NULL,
+  theme = theme_minimal(
+    base_size = 14, # Adjust text size
+    core = list(bg_params = list(fill = c("lightblue", "lightgray"))), # Add row colors
+    colhead = list(fg_params = list(fontface = "bold")) # Bold column headers
+  )
+)
+
+
+DEseq.common.27 %>% select(geneNameProtein, Tissue) %>%
+  rename(BulkRNA_Tissue = "Tissue") %>%
+  mutate(Zone = "ZoneA") %>%
+  mutate(Zone = replace(Zone, grepl("Sac_center",BulkRNA_Tissue),"ZoneB")) %>%
+  mutate(Zone = replace(Zone, grepl("Sac_distal",BulkRNA_Tissue),"ZoneC")) ->
+  finalList.bulk
+
+three_set_venn <- ggVennDiagram(genesOfInterest)
+
+geneInfo %>% filter(silkGroup %in% c("Spice-LMa","AmSp-like","MaSp4","MaSp3","MaSp2","MaSp1")) %>%
+  select(geneNameProtein,silkGroup)->
+  silkProteins
+
+list(Common_17 = finalList.common$geneNameProtein,
+     MinorBulk27 = finalList.bulk$geneNameProtein,
+     MajorSilk18 = silkProteins$geneNameProtein) ->
+  figure7VennInfo
+
+three_set_venn_common <- ggVennDiagram(figure7VennInfo)
+
+png("~/Google Drive/My Drive/Jobb/Minor gland/paper2/figures_new/Figure7/Common_Venn.png", width = 600, height = 600)
+print(three_set_venn_common)
+dev.off()
+
+
+pdf("~/Google Drive/My Drive/Jobb/Minor gland/paper2/figures_new/Figure7/Common_Venn.pdf", width = 5, height = 5)
+print(three_set_venn_common)
+dev.off()
+
+
+
+list(Unique_20 = finalList.unique$geneNameProtein,
+     MinorBulk27 = finalList.bulk$geneNameProtein,
+     MajorSilk18 = c(silkProteins$geneNameProtein)) ->
+  figure7VennInfo
+
+three_set_venn_unique <- ggVennDiagram(figure7VennInfo)
+
+png("~/Google Drive/My Drive/Jobb/Minor gland/paper2/figures_new/Figure7/Unique_Venn.png", width = 600, height = 600)
+print(three_set_venn_unique)
+dev.off()
+
+pdf("~/Google Drive/My Drive/Jobb/Minor gland/paper2/figures_new/Figure7/Unique_Venn.pdf", width = 5, height = 5)
+print(three_set_venn_unique)
+dev.off()
+
+
+setdiff(setdiff(finalList.unique$geneNameProtein,finalList.bulk$geneNameProtein) ,silkProteins$geneNameProtein)
+
+
+write_csv(finalList.genes, "~/Google Drive/My Drive/Jobb/Minor gland/paper2/figures_new/figure7/SupplementaryTable_scRNA.unique_common_genes_2024.csv")
+
+```
+
+
+
+# Bulk RNA
+
+
+All analysis made in "FigureBulk.Rmd"
+
+
+
+# Visaulise expression
+
+##
+
+```{r}
+
+
+major.minor.sct.integrated.clean.sub
+
+major.minor.sct.integrated.clean.visual =
+  SCTransform(major.minor.sct.integrated.clean,
+              new.assay.name = "BothSCT",
+              residual.features = c(uniqueMarkers$scGeneName,common.sct.10.found10$scGeneName))
+
+
+
+## Average expression
+avg_expr <- AverageExpression(major.minor.sct.integrated.clean.visual,
+                              group.by = "CellTypes",
+                              assays = "BothSCT") 
+
+avg_expr$BothSCT %>% as.data.frame() %>%
+  rownames_to_column(var = "scGeneName") %>%
+  pivot_longer(names_to = "CellTypes", values_to = "NormExpression", -scGeneName) ->
+  avg_expr.BothSCT.long
+
+
+ avg_expr.BothSCT.long %>%
+  inner_join(Celltypes.info) %>%
+   ungroup() %>%
+  group_by(scGeneName,glandZone) %>%
+  summarise(NormExpression = mean(NormExpression)) %>%
+  inner_join(geneInfo) %>%
+  select(geneNameProtein,geneName, glandZone,NormExpression) ->
+avg_expr.BothSCT.long   
+ 
+ 
+
+
+```
+
+### Common genes
+
+```{r}
+order =c("lman2l","x975_2",
+          "SpiCE-LMa3","SpiCE-LMa6","AmSp-like1",
+         "AmSp-like2","LASC009784","SpiCE-LMa2","SpiCE-LMa4",
+         "spa","LASC007099","LASC017532","mttp_2","SpiCE-LMa1")     
+
+ common.sct.sp.prot.sig.genes  %>%
+   filter(geneNameProtein %in% order) %>%
+   mutate(geneNameProtein = factor(geneNameProtein,
+                                   levels= order)) %>%
+   arrange(geneNameProtein)->
+   common.sct.sp.prot.sig.genes
+ 
+ 
+ 
+ 
+   
+```
+
+
+#### sc Heatmap
+```{r}
+
+DoHeatmap(major.minor.sct.integrated.clean, features = features$scGeneName,group.by = "CellTypes") 
+
+common.sct.sp.prot.sig.genes[c(1:6,8,9,7,15:17,14,10:13),] ->
+  common.sct.sp.prot.sig.genes.2
+
+DoHeatmap(major.minor.sct.integrated.clean.visual,assay = "integrated",raster = FALSE,
+          features = common.sct.sp.prot.sig.genes$scGeneName,
+          group.bar = TRUE,
+          group.colors = scCellCelltypeOrderColorBoth,
+          group.by = "CellTypes" )+
+  scale_fill_gradientn(colors = c("blue", "white", "red")) ->
+  common.heatmap
+ggsave("~/Google Drive/My Drive/Minor gland/paper2/figures_new/figure7/common.sc.integrated.HM.pdf", common.heatmap)
+
+
+DoHeatmap(major.minor.sct.integrated.clean.visual,raster = FALSE,
+          features = uniqueMarkers.sp.prot.sig.genes$scGeneName,
+          group.bar = TRUE,
+          assay = "BothSCT",
+          group.colors = scCellCelltypeOrderColorBoth,
+          group.by = "CellTypes" )+
+  scale_fill_gradientn(colors = c("blue", "white", "red")) ->
+  unique.heatmap    
+
+ggsave("~/Google Drive/My Drive/Minor gland/paper2/figures_new/figure7/unique.sc.HM.pdf", unique.heatmap)
+
+
+
+```
+
+#### sc Heatmap 27 bulkRNAgenes
+```{r}
+
+
+
+bulkFeatures = data.frame(geneNameProtein = ordered_genes) %>% inner_join(geneInfo)
+
+
+DoHeatmap(major.minor.sct.integrated.clean.visual,raster = FALSE,
+          features = rev(bulkFeatures$scGeneName),
+          group.bar = TRUE,
+          assay = "BothSCT",
+          group.colors = scCellCelltypeOrderColorBoth,
+          group.by = "CellTypes" )+
+  scale_fill_gradientn(colors = c("blue", "white", "red")) ->
+  bulk.heatmap    
+
+ggsave("~/Google Drive/My Drive/Minor gland/paper2/figures_new/figure7/bulkRNA.27.HM.pdf", unique.heatmap)
+```
+
+
+##### Minor only
+
+```{r}
+
+
+
+major.minor.sct.integrated.clean.visual.minor <- subset(major.minor.sct.integrated.clean.visual, subset = GlandType == "Minor")
+
+bulkGenes27 = rev(bulkFeatures$scGeneName)
+
+bulkGenes27[c(1:12,22:27,13:21)]->
+  bulkGenes27.2
+
+bulkGenes27.2[c(1:18,20:27,19)]->
+  bulkGenes27.2
+DoHeatmap(major.minor.sct.integrated.clean.visual.minor,raster = FALSE,
+          features = bulkGenes27,
+          group.bar = TRUE,
+          assay = "BothSCT",
+          group.colors = scCellCelltypeOrderColorBoth,
+          group.by = "CellTypes" )+
+  scale_fill_gradientn(colors = c("blue", "white", "red")) ->
+  bulk.27.minor.heatmap   
+ggsave("~/Google Drive/My Drive/Minor gland/paper2/figures_new/figure7/bulkRNA.27.minor.HM.pdf", unique.heatmap)
+
+
+
+
+
+```
+
+#### Complex Heatmap
+##### scRNA
+```{r} 
+
+
+
+
+avg_expr.BothSCT.long %>% ungroup() %>%
+  filter(scGeneName %in% common.sct.sp.prot.sig.genes$scGeneName)%>%
+  filter(glandZone %in% c("Minor_ZoneA","Minor_ZoneB","Minor_ZoneC",
+                          "Major_ZoneA","Major_ZoneB","Major_ZoneC")) %>%
+  select(geneNameProtein,glandZone , NormExpression)->
+  common.scRNA.expression
+  
+
+common.scRNA.expression %>%
+  filter(NormExpression > 1e-04) %>%
+  pivot_wider(names_from = "glandZone", values_from = "NormExpression",
+              values_fill = 1e-04) %>%
+  column_to_rownames(var = "geneNameProtein")->
+  common
+
+common[as.character(common.sct.sp.prot.sig.genes$geneNameProtein),] -> 
+common
+
+common.markerGenes = 
+  markerGenes.all.wide[rownames(common),colnames(common) ]
+
+scRNA.data.common = log2(common)
+ 
+ 
+
+col_fun_scRNA <- colorRamp2(c(0, 3 ,8), c("blue", "white", "red")) # 
+
+
+Heatmap(scRNA.data.common,
+        col = col_fun_scRNA,
+        na_col = NA,
+        rect_gp = gpar(type = "none"), #Important to remove the default drawing of the cells
+        cell_fun = function(j, i, x, y, width, height, fill) {
+          if (common.markerGenes[i, j]==1) {
+            grid.rect(x = x, y = y, width = width - unit(2, "mm"), height = height - unit(2, "mm"),
+                      gp = gpar(col = "black",  lwd = 2), just = "center")
+          }else{
+            grid.rect(x = x, y = y, width = width - unit(2, "mm"), height = height - unit(2, "mm"),
+                      gp = gpar(col = NA,  lwd = 2), just = "center")
+            
+          }
+          grid.rect(x = x, y = y, width = width - unit(2.5, "mm"), height = height - unit(2.5, "mm"), # Cell gap
+                    gp = gpar(fill = col_fun_scRNA(scRNA.data.common[i,j]), col = NA), just = "center") # Remove black outline
+          #Fill the cells with the color gradient
+        },
+        row_names_side = "right",
+        column_names_side = "bottom",
+        name = "scRNA expression",
+        row_gap = unit(0.5, "mm"),
+        column_gap = unit(0.5,"mm"),
+        cluster_columns = FALSE,
+        cluster_rows = FALSE) ->
+  common.HM.scRNA
+common.HM.scRNA
+
+pdf("~/Google Drive/My Drive/Jobb/Minor gland/paper2/figures_new/figure7/common.scRNA.HM.2.pdf", width = 6, height = 8)
+common.HM.scRNA
+dev.off()
+
+```
+##### Proteomics data
+```{r}
+
+
+MQ_data.AmpGl.QC.summary.QC %>%
+  inner_join(geneInfo) %>% 
+  filter(geneNameProtein %in% common.sct.sp.prot.sig.genes$geneNameProtein) %>%
+  arrange(geneName,Part, gland)  %>%
+  mutate(percent = relativeIntensity*100) %>%
+  select(geneNameProtein,Part,gland,percent ) %>%
+  pivot_wider(names_from = c(gland, Part), 
+              values_from = percent ,
+              names_sep = "_") %>%
+  column_to_rownames("geneNameProtein") ->
+  MQ.data.common
+
+minPercent = log2(min(MQ_data.AmpGl.QC.summary.QC$relativeIntensity)*100)
+maxPercent = log2(max(MQ_data.AmpGl.QC.summary.QC$relativeIntensity)*100)
+
+
+ MQ.data.common[as.character(common.sct.sp.prot.sig.genes$geneNameProtein),c("Minor_Gland","Major_Gland","Minor_Dope","Major_Dope","Major_Silk")]  ->
+   MQ.data.common
+ 
+ MQ.data.common = log2(MQ.data.common)
+
+col_fun_Protein <- colorRamp2(c(-5,-3,5),
+                      c("blue", "white", "red"))# 
+
+
+Heatmap(MQ.data.common,
+        col = col_fun_Protein,
+        na_col = "black",
+        rect_gp = gpar(type = "none"), #Important to remove the default drawing of the cells
+        cell_fun = function(j, i, x, y, width, height, fill) {
+          if (!is.na(MQ.data.common[i, j])) {
+            grid.rect(x = x, y = y, width = width - unit(2, "mm"), height = height - unit(2, "mm"),
+                    gp = gpar(col = "black",  lwd = 2), just = "center")
+          grid.rect(x = x, y = y, width = width - unit(2.5, "mm"), height = height - unit(2.5, "mm"), # Cell gap
+                              gp = gpar(fill = col_fun_Protein(MQ.data.common[i,j]),
+                                        col = NA),
+                    just = "center") # Remove black outline
+ #Fill the cells with the color gradient
+          }
+
+        },
+        row_names_side = "right",
+        column_names_side = "bottom",
+        name = "log2 percent",
+        row_gap = unit(0.5, "mm"),
+        column_gap = unit(0.5,"mm"),
+        cluster_columns = FALSE, cluster_rows = FALSE) ->
+  common.HM.protein
+
+common.HM.protein
+
+
+pdf("~/Google Drive/My Drive/Jobb/Minor gland/paper2/figures_new/figure7/common.protein.HM.2.pdf", width = 6, height = 8)
+common.HM.protein
+dev.off()
+ 
+```
+
+##### BulkRNA data
+
+```{r}
+
+DEseq.gland.results %>%
+  filter(geneNameProtein %in%
+           uniqueMarkers.sp.prot.sig.genes$geneOrder ) %>%
+  mutate(sigLevel = "None") %>%
+  mutate(sigLevel = replace(sigLevel, padj < 0.05, "***")) %>%
+  mutate(dir = "Up") %>%
+  mutate(dir = replace(dir, log2FoldChange < 0, "Down")) %>%
+  select(geneNameProtein,Tissue,log2FoldChange,sigLevel,dir)->
+  DEseq.unique.results
+
+DEseq.unique.results
+
+
+
+DEseq.gland.results %>%
+  filter(scGeneName %in% common.sct.sp.prot.sig.genes$scGeneName ) %>%
+  mutate(sigLevel = "None") %>%
+  mutate(sigLevel = replace(sigLevel, padj < 0.05, "***")) %>%
+  mutate(dir = "Up") %>%
+  mutate(dir = replace(dir, log2FoldChange < 0, "Down")) %>%
+  select(geneNameProtein,Tissue,log2FoldChange,sigLevel,dir)->
+  DEseq.common.results
+
+DEseq.common.results
+
+```
+
+```{r}
+
+
+bulk.data.merged.QC.tpm %>%
+  inner_join(geneInfo) %>%
+  filter(geneNameProtein %in% common.sct.sp.prot.sig.genes$geneNameProtein) %>%
+  inner_join(sampleInfo.QC.merged)%>%
+  filter(Tissue %in% c("Minor","Major","Head")) %>%
+  group_by(geneNameProtein,Tissue) %>%
+  summarise(mean = mean(tpm))  %>%
+  pivot_wider(names_from = "Tissue", values_from = "mean") %>%
+  column_to_rownames("geneNameProtein") %>%
+  select(Head,Major,Minor) %>%
+  as.matrix() -> mat_tissue.common
+
+mat_tissue = log2(mat_tissue.common)
+mat_tissue = mat_tissue[as.character(common.sct.sp.prot.sig.genes$geneNameProtein),
+                        c("Minor","Major","Head")]
+
+
+border_colors <- c("Up" = "blue", "Down" = "red","None"="black")
+
+
+
+DEseq.common.results %>%
+  select(geneNameProtein,Tissue,log2FoldChange) %>%
+  pivot_wider(names_from = "Tissue", values_from = "log2FoldChange") %>%
+  column_to_rownames("geneNameProtein") %>%
+  as.matrix() -> border_data.common
+
+border_data.common[as.character(common.sct.sp.prot.sig.genes$geneNameProtein),] ->
+  border_data.common
+
+
+DEseq.common.results %>%
+  select(geneNameProtein,Tissue,sigLevel) %>%
+  pivot_wider(names_from = "Tissue", values_from = "sigLevel") %>%
+  column_to_rownames("geneNameProtein") %>%
+  as.matrix() -> border.common
+
+border.common[as.character(common.sct.sp.prot.sig.genes$geneNameProtein),] ->
+  border.common
+
+
+breaks <- seq(-10, 10, length.out = 10)
+
+plasma_colors <- viridis::plasma(10)
+
+col_fun_bulk_RNA <-  circlize::colorRamp2(breaks,plasma_colors) # Corrected color mapping
+
+
+Heatmap(border_data.common,
+        col = col_fun_bulk_RNA,
+        na_col = NA,
+        rect_gp = gpar(type = "none"), #Important to remove the default drawing of the cells
+        cell_fun = function(j, i, x, y, width, height, fill) {
+          if (!(border.common[i, j] == "None")) {
+            grid.rect(x = x, y = y, width = width - unit(2, "mm"), height = height - unit(2, "mm"),
+                      gp = gpar(col = "black",  lwd = 2), just = "center")
+          }else{
+            grid.rect(x = x, y = y, width = width - unit(2, "mm"), height = height - unit(2, "mm"),
+                      gp = gpar(col = NA,  lwd = 2), just = "center")
+          }
+          
+          grid.rect(x = x, y = y, width = width - unit(2.5, "mm"), height = height - unit(2.5, "mm"), # Cell gap
+                    gp = gpar(fill = col_fun_bulk_RNA(border_data.common[i,j]), col = NA), just = "center") # Remove black outline
+          #Fill the cells with the color gradient
+        },
+        row_names_side = "right",
+        column_names_side = "bottom",
+        name = "log2fold change",
+        row_gap = unit(0.5, "mm"),
+        column_gap = unit(0.5,"mm"),
+        cluster_columns = FALSE,
+        cluster_rows = FALSE) ->
+  common.HM.RNAbulk
+
+common.HM.RNAbulk
+```
+
+#####  Join common
+
+```{r}
+common.HM.scRNA+common.HM.RNAbulk+common.HM.protein -> HM.common.all
+pdf("~/Google Drive/My Drive/Minor gland/paper2/figures_new/figure7/common.HM.pdf", width = 6, height= 5)
+HM.common.all
+dev.off()
+
+HM.common.all
+
+```
+
+
+### Unique genes
+
+#### sc Heatmap
+```{r}
+
+## scHeatMap
+DoHeatmap(major.minor.sct.integrated.clean.sub.2,features = uniqueMarkers.sp.prot.sig.genes$scGeneName,
+          group.bar = TRUE,assay = "BothSCT",
+          group.colors = scCellCelltypeOrderColorBoth,
+          group.by = "CellTypes" )+
+  scale_fill_gradientn(colors = c("blue", "white", "red"))
+
+
+ggsave("~/Google Drive/My Drive/Minor gland/paper2/figures_new/figure7/unique.sc.HM.pdf")
+```
+
+
+
+#### Complex heatmap
+
+##### scRNA data
+```{r}
+uniqueMarkers.sp.prot.sig.genes %>%
+  select(scGeneName) %>%inner_join(geneInfo) %>%
+  inner_join(avg_expr.BothSCT.long) %>%
+  select(scGeneName,geneNameProtein, glandZone,NormExpression) ->
+  unique.scRNA.expression
+
+unique.scRNA.expression %>%
+  filter(NormExpression > 1e-04) %>%
+  pivot_wider(names_from = "glandZone", values_from = "NormExpression",
+              values_fill = 1e-04) %>%
+  column_to_rownames(var = "geneNameProtein")%>%
+  select(-scGeneName)->
+  unique
+
+unique = unique[go$geneOrder,glandZoneOrder$glandZone[1:6]]
+
+unique
+
+scRNA.data = log2(unique)
+
+unique.markerGenes = 
+  markerGenes.all.wide[rownames(scRNA.data),colnames(scRNA.data) ]
+
+
+min_val <- min(scRNA.data)
+max_val <- max(scRNA.data)
+
+
+
+Heatmap(scRNA.data,
+        col = col_fun_scRNA,
+        na_col = NA,
+        rect_gp = gpar(type = "none"), #Important to remove the default drawing of the cells
+        cell_fun = function(j, i, x, y, width, height, fill) {
+          if (unique.markerGenes[i, j] ==1) {
+            grid.rect(x = x, y = y, width = width - unit(2, "mm"), height = height - unit(2, "mm"),
+                      gp = gpar(col = "black",  lwd = 2), just = "center")
+          }else{
+            grid.rect(x = x, y = y, width = width - unit(2, "mm"), height = height - unit(2, "mm"),
+                      gp = gpar(col = NA,  lwd = 2), just = "center")
+          }
+          
+          grid.rect(x = x, y = y, width = width - unit(2.5, "mm"), height = height - unit(2.5, "mm"), # Cell gap
+                    gp = gpar(fill = col_fun_scRNA(scRNA.data[i,j]), col = NA), just = "center") # Remove black outline
+          #Fill the cells with the color gradient
+        },
+        row_names_side = "right",
+        column_names_side = "bottom",
+        name = "scRNA expression",
+        row_gap = unit(0.5, "mm"),
+        column_gap = unit(0.5,"mm"),
+        cluster_columns = FALSE,
+        cluster_rows = FALSE) ->
+  unique.HM.scRNA
+unique.HM.scRNA
+
+
+
+
+```
+
+##### Proteomics data
+```{r}
+
+
+MQ_data.AmpGl.QC.summary.QC %>%
+  inner_join(geneInfo) %>% 
+  filter(geneNameProtein %in% uniqueMarkers.sp.prot.sig.genes$geneOrder) %>%
+  arrange(geneName,Part, gland)  %>%
+  mutate(percent = relativeIntensity*100) %>%
+  select(geneNameProtein,Part,gland,percent ) %>%
+  pivot_wider(names_from = c(gland, Part), 
+              values_from = percent ,
+              names_sep = "_") %>%
+  column_to_rownames("geneNameProtein") ->
+  MQ.data
+
+
+ MQ.data[as.character(uniqueMarkers.sp.prot.sig.genes$geneOrder),c("Minor_Gland","Major_Gland","Minor_Dope","Major_Dope","Minor_Silk","Major_Silk")]  ->
+   MQ.data
+ 
+ MQ.data = log2(MQ.data)
+
+min_val <- min(MQ.data)
+max_val <- max(MQ.data)
+
+
+Heatmap(MQ.data,
+        col = col_fun_Protein,
+        na_col = "black",
+        rect_gp = gpar(type = "none"), #Important to remove the default drawing of the cells
+        cell_fun = function(j, i, x, y, width, height, fill) {
+          if (!is.na(MQ.data[i, j])) {
+            grid.rect(x = x, y = y, width = width - unit(2, "mm"), height = height - unit(2, "mm"),
+                    gp = gpar(col = "black",  lwd = 2), just = "center")
+          grid.rect(x = x, y = y, width = width - unit(2.5, "mm"), height = height - unit(2.5, "mm"), # Cell gap
+                              gp = gpar(fill = col_fun_Protein(MQ.data[i,j]),
+                                        col = NA),
+                    just = "center") # Remove black outline
+ #Fill the cells with the color gradient
+          }
+
+        },
+        row_names_side = "right",
+        column_names_side = "bottom",
+        name = "Protein expression",
+        row_gap = unit(0.5, "mm"),
+        column_gap = unit(0.5,"mm"),
+        cluster_columns = FALSE, cluster_rows = FALSE) ->
+  unique.HM.protein
+
+
+ 
+```
+
+
+##### BulkRNA data
+
+```{r}
+
+DEseq.gland.results %>%
+  filter(geneNameProtein %in%
+           uniqueMarkers.sp.prot.sig.genes$geneOrder ) %>%
+  mutate(sigLevel = "None") %>%
+  mutate(sigLevel = replace(sigLevel, padj < 0.05, "***")) %>%
+  mutate(dir = "Up") %>%
+  mutate(dir = replace(dir, log2FoldChange < 0, "Down")) %>%
+  select(geneNameProtein,Tissue,log2FoldChange,sigLevel,dir)->
+  DEseq.unique.results
+
+DEseq.unique.results
+
+
+
+```
+
+
+```{r}
+
+
+bulk.data.merged.QC.tpm %>%
+  inner_join(geneInfo) %>%
+  filter(geneNameProtein %in% uniqueMarkers.sp.prot.sig.genes$geneOrder) %>%
+  inner_join(sampleInfo.QC.merged)%>%
+  filter(Tissue %in% c("Minor","Major","Head")) %>%
+  group_by(geneNameProtein,Tissue) %>%
+  summarise(mean = mean(tpm))  %>%
+  pivot_wider(names_from = "Tissue", values_from = "mean") %>%
+  column_to_rownames("geneNameProtein") %>%
+  select(Head,Major,Minor) %>%
+  as.matrix() -> mat_tissue
+
+mat_tissue = log10(mat_tissue)
+mat_tissue = mat_tissue[as.character(uniqueMarkers.sp.prot.sig.genes$geneOrder),
+                        c("Minor","Major","Head")]
+
+
+border_colors <- c("Up" = "blue", "Down" = "red","None"="black")
+
+
+
+DEseq.unique.results %>%
+  select(geneNameProtein,Tissue,log2FoldChange) %>%
+  pivot_wider(names_from = "Tissue", values_from = "log2FoldChange") %>%
+  column_to_rownames("geneNameProtein") %>%
+  as.matrix() -> border_data.l2c
+
+border_data.l2c[as.character(uniqueMarkers.sp.prot.sig.genes$geneOrder),] ->
+  border_data.l2c
+
+DEseq.unique.results%>%
+  select(geneNameProtein,Tissue,sigLevel) %>%
+  pivot_wider(names_from = "Tissue", values_from = "sigLevel") %>%
+  column_to_rownames("geneNameProtein") %>%
+  as.matrix() -> border_data.sl
+
+border_data.sl[as.character(uniqueMarkers.sp.prot.sig.genes$geneOrder),] ->
+  border_data.sl
+
+class(col_fun)
+
+
+Heatmap(border_data,
+        col = col_fun_bulk_RNA,
+        na_col = NA,
+        rect_gp = gpar(type = "none"), #Important to remove the default drawing of the cells
+        cell_fun = function(j, i, x, y, width, height, fill) {
+          if (border_data.sl[i,j] != "None") {
+            grid.rect(x = x, y = y, width = width - unit(2, "mm"), height = height - unit(2, "mm"),
+                      gp = gpar(col = "black",  lwd = 2), just = "center")
+          }else{
+            grid.rect(x = x, y = y, width = width - unit(2, "mm"), height = height - unit(2, "mm"),
+                      gp = gpar(col = NA,  lwd = 2), just = "center")
+            
+          }
+          grid.rect(x = x, y = y, width = width - unit(2.5, "mm"), height = height - unit(2.5, "mm"), # Cell gap
+                    gp = gpar(fill = col_fun_bulk_RNA(border_data[i,j]), col = NA), just = "center") # Remove black outline
+          #Fill the cells with the color gradient
+        },
+        row_names_side = "right",
+        column_names_side = "bottom",
+        name = "log2Fold change",
+        row_gap = unit(0.5, "mm"),
+        column_gap = unit(0.5,"mm"),
+        cluster_columns = FALSE,
+        cluster_rows = FALSE) ->
+  unique.HM.RNAbulk
+```
+#####  Join Unique
+
+```{r}
+unique.HM.scRNA+unique.HM.RNAbulk+unique.HM.protein -> HM_all.unique
+
+pdf("~/Google Drive/My Drive/Minor gland/paper2/figures_new/figure7/unique.HM.pdf", width = 6.5, height= 5.5)
+HM_all.unique
+dev.off()
+
+
+HM_all.unique
+
+```
+
+```{r}
+
+
+markerGenes.integrated.both.Zones %>%
+  rename(geneName = "gene") %>%
+  rename(Zone = "cluster") %>% inner_join(geneInfo) ->GI.markers
+
+GO.info.function = read_tsv("../../../annotation/functional/GOterms.description.tsv") %>%
+  rename(Ontology_term = "GOterm")
+GI.markers %>% select(Zone, geneName, gene_id)-> GI.markers
+ getGOinfo(GI.markers) %>% filter(!is.na(Ontology_term)) %>% 
+   group_by(Zone,Ontology_term) %>%summarise(n = n())  %>% inner_join(GO.info.function) %>%
+   arrange(Ontology_term)  %>% filter(Subclass == "biological_process")
+
+Interpro.function = read_tsv("../../../annotation/functional/Interpro.tsv") %>%
+  rename(Term = "ENTRY_AC")
+ 
+  getGene2Term(GI.markers) %>% filter(Type =="InterPro" )%>% 
+   group_by(Zone,Type,Term) %>%summarise(n = n())  %>% 
+    filter(n > 10) %>%
+    arrange(Term) %>% inner_join(Interpro.function)
+
+  
+markerGenes.integrated.both.CellTypes %>% group_by(gene) %>%
+  summarise(found = 1) %>% inner_join(markerGenes.integrated.both.CellTypes) %>%
+  select(gene, cluster,found) %>% pivot_wider(names_from = "cluster", values_from = "found", values_fill = 0) ->
+  test
+
+
+
+```
+
+```{r}
+major.minor.sct.integrated.clean@meta.data %>%
+  ggplot(aes(x = seurat_clusters,fill= cellType )) + geom_bar() + facet_wrap(.~GlandType2)
+
+major.minor.sct.integrated@meta.data%>% 
+  select(cellID,seurat_clusters) %>%
+  mutate(zone = replace(cellType, is.na(cellType), 
+                major.minor.sct.integrated@meta.data$clusterZones[which(!is.na(clusterZones))])) %>%
+  select(cellID,cellType) ->md.2
+
+DimPlot(major.minor.sct.integrated, reduction = "umap")
+
+
+major.minor.sct.integrated.clean@meta.data
+major.minor.sct.integrated.clean = SetIdent(major.minor.sct.integrated.clean,value =  "GlandType2")  
+
+markerGenes.integrated.both = FindAllMarkers(major.minor.sct.integrated.clean, logfc.threshold = 0.5 , only.pos = TRUE)
+Smajor.minor.sct.integrated.clean = PrepSCTFindMarkers(Smajor.minor.sct.integrated.clean)
+
+markersGenesGland = list()
+ parts  = c("Duct","ZoneA","ZoneC","ZoneABC","ZoneB")
+for( part in parts ){
+   MM.part = subset(Smajor.minor.sct.integrated.clean,Zone ==part )
+   MM.part.gland.markers = FindAllMarkers(MM.part, logfc.threshold = 1.0 , only.pos = TRUE,assay = "RNA")
+   markersGenesGland[[part]] = MM.part.gland.markers
+  
+}
+
+ 
+ Smajor.minor.sct.integrated.clean = SetIdent(major.minor.sct.integrated.clean,value =  "Zone")  
+
+markerGenes.integrated.both = FindAllMarkers(Smajor.minor.sct.integrated.clean, logfc.threshold = 0.5 , only.pos = TRUE, max.cells.per.ident = 2000)
+
+
+
+markerGenes.integrated.both %>% filter(avg_log2FC > 2, pct.1 > 0.4) -> 
+  markerGenes.integrated.both.qc
+
+
+markerGenes.integrated.both.qc %>% rename(geneName = "gene") %>%
+  inner_join(getGeneInfoFull()) ->
+  markerGenes.integrated.both.qc
+
+
+markerGenes.integrated.both.qc.2 = getGene2Term(markerGenes.integrated.both.qc)
+markerGenes.integrated.both.qc.GO = getGOinfo(markerGenes.integrated.both.qc)
+markerGenes.integrated.both.qc.GO%>% group_by(cluster,Ontology_term) %>%
+  summarise(n = n()) %>%
+  arrange(-n)
+  
+
+set.seed(1234) # for reproducibility 
+
+
+wordcloud(words = df$word, freq = df$freq, min.freq = 1,           max.words=200, random.order=FALSE, rot.per=0.35,            colors=brewer.pal(8, "Dark2"))
+
+```
+
+
+
+
+#### Merge markerGenes and visualise
+```{r}
+
+bind_rows(zoneAmarkers.sig,zoneBmarkers.sig,zoneCmarkers.sig) %>%
+ group_by(gene) %>%
+  arrange(-avg_log2FC) %>%
+  slice_head(n = 1) -> markerGenesUnique   
+
+
+markerGenesUnique %>%
+  inner_join(geneInfo) %>%
+  filter(signalP == "Yes") %>%
+  arrange(cluster,zone) ->
+  markerGenesUnique
+
+
+
+
+major.minor.sct.integrated.clean.sub.HM =
+  SCTransform(major.minor.sct.integrated.clean.sub,
+              new.assay.name = "BothSCT",
+              residual.features = c(markerGenesUnique$scGeneName))
+
+
+DoHeatmap(major.minor.sct.integrated.clean.sub.HM,features = unique(markerGenesUnique$scGeneName),
+          group.bar = TRUE,
+          group.colors = scCellCelltypeOrderColorBoth,
+          group.by = "Zone" )+
+  scale_fill_gradientn(colors = c("blue", "white", "red"))
+
+
+```
+
+
+```{r}
+## Join the bulkRNA genes, the unique scRNA genes and common genes
+all.genes = unique(c(DEseq.common.27,
+                     common$
+                       ,
+                     common.sct.sp.prot.sig.genes$scGeneName))
+
+
+
+```
+
