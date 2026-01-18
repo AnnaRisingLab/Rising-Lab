@@ -1,5 +1,5 @@
 ---
-title: "Figure 1 BulkRNA"
+title: "Figures for BulkRNA"
 author: "Johan"
 date: "01/04/2024"
 output:
@@ -23,37 +23,28 @@ output:
 repositoryPath = "~/git/Rising-Lab/MajorGland_paper"
 signalPFile = "annotation/signalP/Lsc.v1.1.SignalP.v6.tsv"
 
-#source("~/git/RNAmappingPipeline/R/ExpressionAnalysisFunctions.R")
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
-
-#install.packages("kableExtra")
-#library("viridis")     
-
 library(RColorBrewer)
-#library(GenomicFeatures)
-
-#BiocManager::install("DESeq2")
 
 library(DESeq2)
 
 library(ropls)
-
 library(ggforce)
 library(patchwork)
 library(ggpubr)
 library(ggrepel)
 
-
 rename <- dplyr::rename
+summarise = dplyr::summarise               
+select = dplyr::select
+group_by = dplyr::group_by
+
 
 
 source("../loadGeneInfo.R")
 source("../colorSchemes_minor.R")
 source("../customFunctions.R")
-summarise = dplyr::summarise               
-select = dplyr::select
-group_by = dplyr::group_by
 
 
 
