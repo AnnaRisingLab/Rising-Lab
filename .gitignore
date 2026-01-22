@@ -5,3 +5,5 @@
 .Ruserdata
 .DC_Store
 **/.DS_Store
+*.rds
+**/*.rds
