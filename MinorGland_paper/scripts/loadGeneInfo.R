@@ -212,6 +212,8 @@ getSignalPeptideInfo <- function(repositoryPath,
   return(term2Gene.signalP)
 }
 
+
+
 getMajorAmpullateGlandProteins <- function(repositoryPath,
                                            file ="annotation/silk.proteins.1.2.csv"){
   path = paste(repositoryPath,file,sep ="/")
