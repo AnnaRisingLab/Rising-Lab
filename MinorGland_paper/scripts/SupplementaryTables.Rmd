@@ -1,0 +1,113 @@
+---
+title: "Supplementary Tables:Origin, Structure, and Composition of a Spider Major Ampullate Silk Fiber Revealed by Genomics, Proteomics, and Single-Cell and Spatial Transcriptomics"
+author: "Johan"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 2
+    latex_engine: xelatex
+  html_document:
+    toc: true
+    toc_float: true
+header-includes:
+  - \usepackage{pdflscape}
+  - \newcommand{\blandscape}{\begin{landscape}}
+  - \newcommand{\elandscape}{\end{landscape}}
+---
+```{r setup, include=FALSE}
+
+library(knitr)
+library(readr)
+library(tidyverse)
+library(kableExtra)
+library(here)
+library(DT) # New library for interactive HTML tables
+
+
+# Load pre-saved tables
+table1 = read_csv(here("MinorGland_paper", "results", "supplementaryTables", "Suppl.Table.1.spacer_domain_counts.csv.gz")) %>%
+  dplyr::rename(geneName = "geneNameProtein") 
+table2 = read_csv(here("MinorGland_paper", "results", "supplementaryTables", "Suppl.Table.2.proteomics.gland.dope.csv.gz"))%>%
+  dplyr::rename(geneName = "geneNameProtein") %>%
+  select(-gene_id)
+table3 = read_csv(here("MinorGland_paper", "results", "supplementaryTables", "Suppl.Table.3.bulkRNA.expression.glands.csv.gz"))%>%
+  dplyr::rename(geneName = "geneNameProtein")%>%
+  select(-gene_id)
+table4 = read_csv(here("MinorGland_paper", "results", "supplementaryTables", "Suppl.Table.4.bulkRNA.expression.parts.csv.gz"))%>%
+  dplyr::rename(geneName = "geneNameProtein")%>%
+  select(-gene_id)
+table5 = read_csv(here("MinorGland_paper", "results", "supplementaryTables", 
+                       "Suppl.table.5.csv.gz"))%>%
+  dplyr::rename(geneName = "geneNameProtein")
+table6 = read_csv(here("MinorGland_paper", "results", "supplementaryTables", 
+                       "Suppl.table.6.csv.gz"))%>%
+  dplyr::rename(geneName = "geneNameProtein")
+
+
+my_tables = list(table1, table2, table3, table4, table5, table6)
+```
+
+```{r, echo=FALSE, render=FALSE, include=FALSE}
+# This "wakes up" the DT library so the HTML file knows to include the JavaScript
+
+ if (knitr::is_html_output()) {
+   library(DT)
+datatable(mtcars)
+
+}
+```
+
+
+
+```{r print tables, results='asis', echo=FALSE}
+
+
+# Define your explanations in a list that matches your tables
+explanations <- list(
+  "Table 1: * indicates spacer domains identified via HMM search.",
+  "Table 2: Proteomics data. * Fold change calculated relative to control.",
+  "Table 3: Bulk RNA expression. Normalized counts used for analysis.",
+  "Table 4: Differential expression results for gland parts.",
+  "Table 5: Supplementary data for Figure 5.",
+  "Table 6: Supplementary data for Figure 6."
+)
+
+html_tables <- list()
+
+for(i in 1:length(my_tables)) {
+  
+  cat(paste0("\n\n## Supplementary Table ", i, "\n"))
+  
+  note_text <- explanations[[i]]
+  
+  if (knitr::is_html_output()) {
+    # Instead of just printing, we store it and print specifically
+    # Using 'knitr::knit_print' is often more reliable inside loops for HTML
+    p <- datatable(my_tables[[i]], 
+                   caption = note_text,
+                   extensions = 'Buttons',
+                   options = list(pageLength = 20, 
+                                  scrollX = TRUE,
+                                  dom = 'Bfrtip',
+                                  buttons = c('csv')),
+                   rownames = FALSE)
+    
+    # Crucial: Knit needs to see the widget output directly
+    cat(knitr::knit_print(p))
+    cat("\n<hr>\n") 
+    
+  } else {
+    # PDF path stays the same
+    tbl <- kable(my_tables[[i]], 
+                 format = "latex", 
+                 booktabs = TRUE, 
+                 longtable = TRUE) %>% 
+      kable_styling(latex_options = c("striped", "hold_position", "repeat_header", "scale_down")) %>%
+      footnote(general = note_text)
+    
+    print(tbl)
+    cat("\n\\newpage\n")
+  }
+}
+```
