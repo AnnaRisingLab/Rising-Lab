@@ -32,6 +32,8 @@ library(ggpubr)
 library(ggrepel)
 library(gridExtra)
 library(ggVennDiagram)
+library(GGally)
+
 
 
 
@@ -192,7 +194,7 @@ minorProteomics.QC %>%
   minorProteomics.QC
 
 
-minorProteomics.QC %>%filter(geneName =="Spice_8")
+
 
 ```
 
@@ -305,7 +307,8 @@ bulk.data.merged.QC.tpm %>%
   mutate(Group = replace(silkGroup, is.na(silkGroup), "Other")) ->  bulk.data.merged.QC.tpm.summary
 
 
-bulk.data.merged.QC.tpm.summary %>%ggplot(aes(log10(max_tpm ))) + geom_density()
+bulk.data.merged.QC.tpm.summary %>%ggplot(aes(log10(max_tpm ))) + geom_density() + geom_vline(xintercept = log10(4),color = "red") + labs(title = "Distribution of maximum TPM values per gene", x = "log10(max_tpm)")
+
 
 
 bulk.data.merged.QC.tpm.summary %>%
@@ -635,7 +638,6 @@ ggsave(here("MinorGland_paper","figures","figure2","Figure2.E.PCA.minor.parts.pd
 
 
 
-MinorSampleInfo.QC
 
 
 MinorSampleInfo.QC  ->
@@ -686,7 +688,6 @@ geneInfo.Dap.DEseq2 %>%
 
 
 
-MinorSampleInfo.QC
 
 
 MinorSampleInfo.QC %>% 
@@ -853,6 +854,9 @@ data.frame(mir.pca$rotation) %>%
 
 write_csv(file = here("MinorGland_paper","results","bulkRNA","DEseq.minor.parts.location.csv.gz"),
             x = DEseq.minor.parts.location)
+
+
+11
 
 
 

@@ -1,0 +1,113 @@
+---
+title: "H&E staining intensity across minor gland zones"
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.width = 7, fig.height = 5)
+library(tidyverse)
+library(rstatix)
+```
+
+## Data
+
+Measurements (QuPath ellipse ROIs, 35 per zone) of mean hematoxylin and eosin
+optical density from a single image.
+
+```{r data}
+he <- read_tsv("../data/HE_staining/HE_minorZones_35points.txt") |>
+  transmute(
+    zone = factor(Name, levels = c("ZoneA", "ZoneB", "ZoneC")),
+    hematoxylin = `ROI: 1.00 px per pixel: Hematoxylin: Mean`,
+    eosin       = `ROI: 1.00 px per pixel: Eosin: Mean`,
+    area        = `Area px^2`
+  )
+
+count(he, zone)
+anyNA(he)
+```
+
+```{r palette}
+# Shared zone colours used in the other analyses (Zones: ZoneA, ZoneB, ZoneC, Duct)
+source("colorSchemes_minor.R")
+zone_cols <- Zones[c("ZoneA", "ZoneB", "ZoneC")]
+```
+
+## Summary
+
+```{r summary}
+he |>
+  pivot_longer(c(hematoxylin, eosin), names_to = "stain", values_to = "mean_od") |>
+  group_by(stain, zone) |>
+  summarise(n = n(), mean = mean(mean_od), sd = sd(mean_od),
+            median = median(mean_od), .groups = "drop")
+```
+
+## Combined figure
+
+```{r figure, fig.width = 11, fig.height = 5}
+library(patchwork)
+
+he_long <- he |>
+  pivot_longer(c(hematoxylin, eosin), names_to = "stain", values_to = "mean_od")
+
+# Dunn post hoc (Holm) per stain, with bracket positions for the plot
+dunn_pos <- he_long |>
+  group_by(stain) |>
+  dunn_test(mean_od ~ zone, p.adjust.method = "holm") |>
+  add_xy_position(x = "zone", scales = "free_y", step.increase = 0.1)
+
+p_scatter <- ggplot(he, aes(hematoxylin, eosin, fill = zone)) +
+  geom_point(shape = 21, size = 1.2, stroke = 0.2, colour = "grey20", alpha = 0.9) +
+  scale_fill_manual(values = zone_cols) +
+  guides(fill = guide_legend(override.aes = list(size = 3))) +
+  labs(x = "Hematoxylin (mean OD)", y = "Eosin (mean OD)", fill = "Zone") +
+  theme_minimal()
+
+p_box <- ggplot(he_long, aes(zone, mean_od, fill = zone)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.8, show.legend = FALSE) +
+  geom_jitter(width = 0.1, size = 1, show.legend = FALSE) +
+  ggpubr::stat_pvalue_manual(dunn_pos, label = "p.adj.signif", tip.length = 0.01,
+                             hide.ns = FALSE) +
+  facet_wrap(~stain, scales = "free_y") +
+  scale_fill_manual(values = zone_cols) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.12))) +
+  labs(x = NULL, y = "Mean OD", fill = "Zone",
+       caption = "Dunn test, Holm-adjusted: * p<0.05, **** p<0.0001, ns not significant") +
+  theme_minimal()
+
+fig_he <- (p_scatter + p_box) +
+  plot_layout(widths = c(1, 1.5), guides = "collect") +
+  plot_annotation(tag_levels = "A")
+
+fig_he
+
+ggsave("../figures/HE_zones_combined.pdf", fig_he, width = 11, height = 5)
+```
+
+## Statistics
+
+The ROIs come from one image, so they are subsamples of one tissue section,
+not independent biological replicates; p-values describe differences within this
+section only. Normality and equal variance were not assumed, so we use
+Kruskal-Wallis with Dunn post hoc tests (Holm-adjusted).
+
+```{r stats}
+for (s in c("hematoxylin", "eosin")) {
+  cat("\n=====", s, "=====\n")
+  f <- reformulate("zone", s)
+  print(kruskal_test(he, f))
+  print(kruskal_effsize(he, f))
+  print(dunn_test(he, f, p.adjust.method = "holm"))
+}
+```
+
+```{r multivariate}
+# Joint test of both stains
+summary(manova(cbind(hematoxylin, eosin) ~ zone, data = he), test = "Pillai")
+```
+
+```{r session}
+sessionInfo()
+```

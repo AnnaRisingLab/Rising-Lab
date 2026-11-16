@@ -1,0 +1,427 @@
+---
+title: "Minor gland parts DE: effect of blocking on individual"
+author: "Johan"
+date: "12/11/2026"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+    code_folding: hide
+    df_print: paged
+---
+
+Compares the DESeq2 analysis of minor gland parts in `MinorAnalysis.Rmd`
+(design `~0 + Tissue`) with the same analysis blocking on individual
+(design `~individual + Tissue`, Tail_proximal as reference).
+
+The individual is taken from the numeric suffix of the sample name
+(e.g. `SaCe_3` is individual 3). This is an assumption; check it against the
+sample metadata.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+library(here)
+library(tidyverse)
+library(DESeq2)
+library(patchwork)
+
+rename <- dplyr::rename
+summarise <- dplyr::summarise
+select <- dplyr::select
+group_by <- dplyr::group_by
+
+source(here("MinorGland_paper/scripts", "customFunctions.R"))
+source(here("MinorGland_paper/scripts", "colorSchemes_minor.R"))
+```
+
+# Data (as in MinorAnalysis.Rmd)
+
+```{r data}
+geneInfo <- read_csv(here("annotation", "Lsc.v1.0.3.geneInfo.csv.gz"))
+
+# Gene filter: max TPM > 4 across all bulk samples
+sampleInfo.QC.merged <- read_csv(here("MinorGland_paper", "data", "bulkRNA", "sampleInfo.QC.merged.csv.gz"))
+bulk.data.merged <- read_csv(here("MinorGland_paper", "data", "bulkRNA", "All.samples.count.csv.gz")) |>
+  rename(gene_id = "Geneid")
+bulk.data.merged.QC <- bulk.data.merged[, c("gene_id", sampleInfo.QC.merged$sample)]
+
+bulk.data.merged.QC |>
+  pivot_longer(cols = -gene_id, names_to = "sample", values_to = "count") |>
+  inner_join(geneInfo, by = "gene_id") |>
+  mutate(normLengthCount = count / tx_len) |>
+  group_by(sample) |>
+  mutate(tpm = normLengthCount / sum(normLengthCount) * 1e6) |>
+  group_by(gene_id) |>
+  summarise(max_tpm = max(tpm)) |>
+  filter(max_tpm > 4) |>
+  inner_join(geneInfo, by = "gene_id") ->
+  geneInfo.QC
+
+# Proteomics-expressed genes
+minorProteomics <- read_csv(here("MinorGland_paper", "data", "proteomics", "minor", "minorAmpullateEpxression.csv.gz"))
+minorProteomics |>
+  filter(Sample != "Mi_Dope_1") |>
+  group_by(Part, geneName) |>
+  summarise(numberOfSamples = n(),
+            averageIntensity = sum(relativeIntensity) / numberOfSamples,
+            .groups = "drop") |>
+  group_by(geneName) |>
+  summarise(max = max(averageIntensity)) |>
+  filter(max > 0.0001) ->
+  minorProteomics.expressed
+
+geneInfo.QC.minor.prot <- inner_join(geneInfo.QC, minorProteomics.expressed, by = "geneName")
+
+# Minor parts counts
+MinorCounts <- read_tsv(here("MinorGland_paper", "data", "bulkRNA", "minorParts",
+                             "minorParts.featureCount.reverse.txt.gz"), skip = 1) |>
+  select(-6:-2) |>
+  pivot_longer(names_to = "sample", values_to = "readCount", -Geneid) |>
+  mutate(sample = gsub("/Aligned.sortedByCoord.out.bam", "", sample)) |>
+  rename(gene_id = "Geneid") |>
+  mutate(sample = gsub("PMI", "TaPr", sample),
+         sample = gsub("DMI", "SaPr", sample),
+         sample = gsub("BMI", "SaCe", sample),
+         sample = gsub("CMI", "SaDi", sample),
+         sample = gsub("CDMi", "SaDi_Du", sample))
+
+TissueOrder <- c("Gland", "Tail_proximal", "Sac_proximal", "Sac_center", "Sac_distal", "Sac_distal_Duct")
+
+MinorCounts |>
+  distinct(sample) |>
+  mutate(Tissue = case_when(
+    grepl("SaDi_Du", sample) ~ "Sac_distal_Duct",
+    grepl("SaDi", sample)    ~ "Sac_distal",
+    grepl("SaPr", sample)    ~ "Sac_proximal",
+    grepl("TaPr", sample)    ~ "Tail_proximal",
+    TRUE                     ~ "Sac_center"),
+    individual = paste0("ind", sub(".*_", "", sample))) |>
+  mutate(Tissue = factor(Tissue, levels = TissueOrder)) |>
+  arrange(Tissue) |>
+  mutate(Tissue = as.character(Tissue)) ->
+  MinorSampleInfo.QC
+
+MinorSampleInfo.QC |> dplyr::count(Tissue, individual) |> pivot_wider(names_from = individual, values_from = n)
+```
+
+All samples are included here, including the five removed by QC in `MinorAnalysis.Rmd`
+(SaCe_4, SaCe_1, SaPr_5, TaPr_1, SaPr_1).
+
+Sac_distal_Duct exists only in individuals 1 and 2, and Sac_distal only in 3-5. Duct versus Sac_distal is therefore fully
+confounded with individual, so that contrast cannot be estimated with blocking. Only the
+analysis excluding the duct samples is compared below.
+
+# DESeq2 with and without blocking
+
+```{r dds}
+MinorSampleInfo.QC |>
+  filter(Tissue != "Sac_distal_Duct") |>
+  mutate(individual = factor(individual)) ->
+  si
+
+dds.base <- getDEseq2Object(count.df = MinorCounts, md = si,
+                            gi = geneInfo.QC.minor.prot, design = "Tissue")
+
+dds.noblock <- dds.base
+design(dds.noblock) <- ~ 0 + design
+
+dds.block <- dds.base
+# With an intercept and Tail_proximal as reference, each design coefficient is
+# the part vs Tail_proximal contrast, adjusted for individual
+dds.block$design <- relevel(dds.block$design, ref = "Tail_proximal")
+design(dds.block) <- ~ individual + design
+
+# Check the blocked design is full rank
+qr(model.matrix(design(dds.block), colData(dds.block)))$rank == ncol(model.matrix(design(dds.block), colData(dds.block)))
+
+dds.noblock <- DESeq(dds.noblock)
+dds.block <- DESeq(dds.block)
+
+resultsNames(dds.block)
+```
+
+```{r results}
+contrasts.parts <- c(Sac_proximal = "designSac_proximal",
+                     Sac_center   = "designSac_center",
+                     Sac_distal   = "designSac_distal")
+
+getParts <- function(dds, model) {
+  imap(contrasts.parts, \(coefName, part) {
+    res <- if (model == "no_block") {
+      results(dds, contrast = list(c(coefName), c("designTail_proximal")), listValues = c(1, -1))
+    } else {
+      results(dds, name = paste0("design_", part, "_vs_Tail_proximal"))
+    }
+    res |>
+      as.data.frame() |>
+      rownames_to_column("gene_id") |>
+      mutate(Tissue = part, model = model)
+  }) |>
+    bind_rows() |>
+    select(gene_id, Tissue, model, baseMean, log2FoldChange, lfcSE, padj)
+}
+
+res.all <- bind_rows(getParts(dds.noblock, "no_block"),
+                     getParts(dds.block, "block_individual")) |>
+  filter(!is.na(padj))
+
+res.wide <- res.all |>
+  pivot_wider(names_from = model, values_from = c(baseMean, log2FoldChange, lfcSE, padj)) |>
+  filter(!is.na(padj_no_block), !is.na(padj_block_individual)) |>
+  inner_join(select(geneInfo, gene_id, geneName, geneNameProtein, signalP), by = "gene_id")
+```
+
+# Comparison
+
+## Per-contrast significance (padj < 0.05, |log2FC| > log2(5))
+
+```{r summary}
+res.all |>
+  mutate(sig = padj < 0.05 & abs(log2FoldChange) > log2(5)) |>
+  group_by(model, Tissue) |>
+  summarise(tested = n(), sig = sum(sig), .groups = "drop") |>
+  pivot_wider(names_from = model, values_from = c(tested, sig))
+
+res.wide |>
+  mutate(sig_nb = padj_no_block < 0.05 & abs(log2FoldChange_no_block) > log2(5),
+         sig_b = padj_block_individual < 0.05 & abs(log2FoldChange_block_individual) > log2(5)) |>
+  group_by(Tissue) |>
+  summarise(both = sum(sig_nb & sig_b),
+            only_no_block = sum(sig_nb & !sig_b),
+            only_block = sum(!sig_nb & sig_b),
+            lfc_cor = cor(log2FoldChange_no_block, log2FoldChange_block_individual),
+            median_se_ratio = median(lfcSE_block_individual / lfcSE_no_block))
+```
+
+## Log2 fold changes
+
+```{r lfc-plot}
+ggplot(res.wide, aes(log2FoldChange_no_block, log2FoldChange_block_individual)) +
+  geom_point(alpha = 0.3, size = 0.8) +
+  geom_abline(color = "red") +
+  facet_wrap(~Tissue) +
+  theme_light() +
+  labs(x = "log2FC (no blocking)", y = "log2FC (blocking on individual)")
+```
+
+## Adjusted p-values
+
+```{r padj-plot}
+ggplot(res.wide, aes(-log10(padj_no_block), -log10(padj_block_individual))) +
+  geom_point(alpha = 0.3, size = 0.8) +
+  geom_abline(color = "red") +
+  facet_wrap(~Tissue) +
+  theme_light() +
+  labs(x = "-log10 padj (no blocking)", y = "-log10 padj (blocking on individual)")
+```
+
+## Pruned gene set used downstream (min padj < 0.05 and max |log2FC| > log2(5) across parts)
+
+```{r pruned}
+prune <- function(df, model) {
+  df |>
+    filter(model == !!model) |>
+    group_by(gene_id) |>
+    summarise(minPadj = min(padj), maxFoldChange = max(abs(log2FoldChange))) |>
+    filter(minPadj < 0.05, maxFoldChange > log2(5)) |>
+    pull(gene_id)
+}
+
+genes.nb <- prune(res.all, "no_block")
+genes.b <- prune(res.all, "block_individual")
+
+tibble(set = c("no_block", "block_individual", "shared", "only_no_block", "only_block"),
+       n = c(length(genes.nb), length(genes.b), length(intersect(genes.nb, genes.b)),
+             length(setdiff(genes.nb, genes.b)), length(setdiff(genes.b, genes.nb))))
+
+geneInfo |>
+  filter(gene_id %in% c(setdiff(genes.nb, genes.b), setdiff(genes.b, genes.nb))) |>
+  mutate(set = if_else(gene_id %in% genes.nb, "only_no_block", "only_block")) |>
+  select(set, gene_id, geneName, geneNameProtein, signalP)
+```
+
+# Effect of the QC-removed samples, with and without blocking
+
+Genes with a p-value but NA padj were removed by DESeq2 independent filtering. The filter
+threshold is chosen per contrast to maximise rejections, so a contrast with little signal gets
+a very high baseMean cutoff and loses many genes.
+
+```{r bad-samples}
+badSamples <- c("SaCe_4", "SaCe_1", "SaPr_5", "TaPr_1", "SaPr_1")
+
+fitModel <- function(drop_bad, block) {
+  d <- dds.base
+  if (drop_bad) d <- d[, !colnames(d) %in% badSamples]
+  d$design <- droplevels(relevel(d$design, ref = "Tail_proximal"))
+  d$individual <- droplevels(d$individual)
+  design(d) <- if (block) ~ individual + design else ~ design
+  DESeq(d, quiet = TRUE)
+}
+
+expand_grid(drop_bad = c(FALSE, TRUE), block = c(FALSE, TRUE)) |>
+  pmap(\(drop_bad, block) {
+    d <- fitModel(drop_bad, block)
+    map(names(contrasts.parts), \(part) {
+      nm <- paste0("design_", part, "_vs_Tail_proximal")
+      rf <- results(d, name = nm)
+      rn <- results(d, name = nm, independentFiltering = FALSE)
+      tibble(drop_bad, block, part,
+             filter_baseMean_cutoff = round(metadata(rf)$filterThreshold, 1),
+             padj_NA_from_filtering = sum(is.na(rf$padj) & !is.na(rf$pvalue)),
+             n_pvalue_below_0.05 = sum(rn$pvalue < 0.05, na.rm = TRUE),
+             n_sig_filtered = sum(rf$padj < 0.05 & abs(rf$log2FoldChange) > log2(5), na.rm = TRUE),
+             n_sig_unfiltered = sum(rn$padj < 0.05 & abs(rn$log2FoldChange) > log2(5), na.rm = TRUE))
+    }) |> list_rbind()
+  }) |>
+  list_rbind()
+```
+
+# Sac_proximal: p-values and dispersions, blocked vs unblocked
+
+```{r sp-compare, fig.width = 9, fig.height = 8}
+spCompare <- function(drop_bad) {
+  d.nb <- fitModel(drop_bad, FALSE)
+  d.b <- fitModel(drop_bad, TRUE)
+  nm <- "design_Sac_proximal_vs_Tail_proximal"
+  r.nb <- as.data.frame(results(d.nb, name = nm, independentFiltering = FALSE))
+  r.b <- as.data.frame(results(d.b, name = nm, independentFiltering = FALSE))
+  tibble(gene_id = rownames(r.nb),
+         baseMean = r.nb$baseMean,
+         lfc_nb = r.nb$log2FoldChange, lfc_b = r.b$log2FoldChange,
+         p_nb = r.nb$pvalue, p_b = r.b$pvalue,
+         disp_nb = mcols(d.nb)$dispGeneEst, disp_b = mcols(d.b)$dispGeneEst,
+         dispFinal_nb = dispersions(d.nb), dispFinal_b = dispersions(d.b),
+         drop_bad = if (drop_bad) "QC-removed samples excluded" else "all samples")
+}
+
+sp <- bind_rows(spCompare(FALSE), spCompare(TRUE)) |>
+  mutate(drop_bad = factor(drop_bad, levels = c("all samples", "QC-removed samples excluded")))
+
+sp |>
+  group_by(drop_bad) |>
+  summarise(median_disp_nb = median(dispFinal_nb, na.rm = TRUE),
+            median_disp_b = median(dispFinal_b, na.rm = TRUE),
+            median_disp_ratio_b_over_nb = median(dispFinal_b / dispFinal_nb, na.rm = TRUE),
+            lfc_cor = cor(lfc_nb, lfc_b, use = "complete.obs"),
+            median_abs_lfc_diff = median(abs(lfc_nb - lfc_b), na.rm = TRUE),
+            p_cor_spearman = cor(p_nb, p_b, method = "spearman", use = "complete.obs"),
+            median_log10p_gain = median(log10(p_nb) - log10(p_b), na.rm = TRUE))
+
+ggplot(sp, aes(-log10(p_nb), -log10(p_b))) +
+  geom_point(alpha = 0.3, size = 0.8) + geom_abline(color = "red") +
+  facet_wrap(~drop_bad) + theme_light() +
+  labs(x = "-log10 p (no blocking)", y = "-log10 p (blocking)") +
+ggplot(sp, aes(dispFinal_nb, dispFinal_b)) +
+  geom_point(alpha = 0.3, size = 0.8) + geom_abline(color = "red") +
+  scale_x_log10() + scale_y_log10() + facet_wrap(~drop_bad) + theme_light() +
+  labs(x = "dispersion (no blocking)", y = "dispersion (blocking)") +
+  plot_layout(ncol = 1)
+```
+
+# PCA coloured by individual (all samples)
+
+```{r pca-individual}
+vsd <- vst(dds.base, blind = TRUE)
+pca <- prcomp(t(assay(vsd)[order(-rowVars(assay(vsd)))[1:1000], ]))
+pve <- round(100 * pca$sdev^2 / sum(pca$sdev^2), 1)
+
+as.data.frame(pca$x[, 1:4]) |>
+  rownames_to_column("sample") |>
+  inner_join(as.data.frame(colData(dds.base)) |> select(sample, Tissue, individual), by = "sample") |>
+  mutate(QC_removed = sample %in% badSamples) ->
+  pca.df
+
+ggplot(pca.df, aes(PC1, PC2, color = individual, shape = Tissue)) +
+  geom_point(size = 3) +
+  geom_text(data = filter(pca.df, QC_removed), aes(label = sample), vjust = -1, size = 3, show.legend = FALSE) +
+  theme_light() + labs(x = paste0("PC1 (", pve[1], "%)"), y = paste0("PC2 (", pve[2], "%)")) +
+ggplot(pca.df, aes(PC3, PC4, color = individual, shape = Tissue)) +
+  geom_point(size = 3) + theme_light() +
+  labs(x = paste0("PC3 (", pve[3], "%)"), y = paste0("PC4 (", pve[4], "%)")) +
+  plot_layout(ncol = 1, guides = "collect")
+```
+
+# Final gene set: part-specific, DE vs head, with signal peptide
+
+Final set as in `MinorAnalysis.Rmd` (`common.signalP`): genes in the pruned parts set (min padj < 0.05
+and max |log2FC| > log2(5) across the three part-vs-Tail_proximal contrasts) that are also
+up in Minor vs Head (padj < 0.05, log2FC > log2(5)) and have a signal peptide.
+The head comparison does not involve individual and is the same in all configurations.
+
+```{r head-de}
+sampleInfo.QC.merged |>
+  mutate(Tissue = as.character(Tissue), sample = as.character(sample)) |>
+  filter(Tissue %in% c("Head", "Major", "Minor")) ->
+  sampleInfo.glands
+
+bulk.data.merged.QC |>
+  filter(gene_id %in% geneInfo.QC$gene_id) |>
+  pivot_longer(-gene_id, values_to = "readCount", names_to = "sample") ->
+  bulk.data.merged.QC.long
+
+dds.Gland <- getDEseq2Object(count.df = bulk.data.merged.QC.long, md = sampleInfo.glands,
+                             gi = geneInfo.QC, design = "Tissue") |>
+  DESeq()
+
+results(dds.Gland, contrast = list(c("designMinor"), c("designHead")), listValues = c(1, -1)) |>
+  as.data.frame() |>
+  rownames_to_column("gene_id") |>
+  filter(!is.na(padj), padj < 0.05, log2FoldChange > log2(5)) |>
+  pull(gene_id) ->
+  genes.head
+
+signalP.genes <- geneInfo |> filter(signalP == "Yes") |> pull(gene_id)
+length(genes.head)
+```
+
+```{r final-sets}
+partsGenes <- function(drop_bad, block) {
+  d <- fitModel(drop_bad, block)
+  map(names(contrasts.parts), \(part) {
+    results(d, name = paste0("design_", part, "_vs_Tail_proximal")) |>
+      as.data.frame() |>
+      rownames_to_column("gene_id") |>
+      mutate(Tissue = part)
+  }) |>
+    list_rbind() |>
+    filter(!is.na(padj)) |>
+    group_by(gene_id) |>
+    summarise(minPadj = min(padj), maxFoldChange = max(abs(log2FoldChange))) |>
+    filter(minPadj < 0.05, maxFoldChange > log2(5)) |>
+    pull(gene_id)
+}
+
+configs <- expand_grid(drop_bad = c(TRUE, FALSE), block = c(FALSE, TRUE)) |>
+  mutate(config = paste0(if_else(drop_bad, "QCfiltered", "allSamples"), "_",
+                         if_else(block, "block", "noBlock")))
+
+sets.parts <- pmap(configs, \(drop_bad, block, config) partsGenes(drop_bad, block)) |>
+  set_names(configs$config)
+
+sets.final <- map(sets.parts, \(g) intersect(intersect(g, genes.head), signalP.genes))
+
+tibble(config = names(sets.parts),
+       parts_pruned = lengths(sets.parts),
+       plus_DE_vs_head = map_int(sets.parts, \(g) length(intersect(g, genes.head))),
+       final = lengths(sets.final))
+```
+
+```{r final-compare}
+# Pairwise comparison to the original analysis (QC-filtered, no blocking)
+ref <- sets.final[["QCfiltered_noBlock"]]
+tibble(config = names(sets.final),
+       final = lengths(sets.final),
+       shared_with_original = map_int(sets.final, \(g) length(intersect(g, ref))),
+       only_in_config = map_int(sets.final, \(g) length(setdiff(g, ref))),
+       only_in_original = map_int(sets.final, \(g) length(setdiff(ref, g))))
+
+# Genes that differ between QC-filtered no-block and QC-filtered block
+union(sets.final$QCfiltered_noBlock, sets.final$QCfiltered_block) |>
+  setdiff(intersect(sets.final$QCfiltered_noBlock, sets.final$QCfiltered_block)) |>
+  (\(g) geneInfo |> filter(gene_id %in% g) |>
+     mutate(in_noBlock = gene_id %in% sets.final$QCfiltered_noBlock,
+            in_block = gene_id %in% sets.final$QCfiltered_block) |>
+     select(geneNameProtein, in_noBlock, in_block))()
+```
