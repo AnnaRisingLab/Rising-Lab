@@ -20,11 +20,26 @@ Supplementary tables are located in the `Supplementary_tables` subdirectory of `
 
 ## Data
 
-Raw data locations will be added upon publication.
+### Raw data
 
-Processed data for all analyses except scRNA-seq are located in the `Data` directory. Seurat objects for scRNA-seq data can be downloaded from the SciLifeLab data repository under the name\
-**“scRNA files for paper ‘Cellular and Molecular Organization of the Spider Minor Ampullate Gland Revealed by Multi-Omics’”**.\
-These files must be placed in the correct locations for the comparative R Markdown file to run properly.
+| Data | Repository | Accession |
+|---|---|---|
+| Bulk RNA-seq, silk glands, head and abdomen | ArrayExpress | E-MTAB-14073, E-MTAB-14077 |
+| Bulk RNA-seq, parts of the minor ampullate gland | ENA | PRJEB124983 |
+| Single-cell RNA-seq, major ampullate gland | ArrayExpress | E-MTAB-14078 |
+| Spatial transcriptomics, abdomen sections | ArrayExpress | E-MTAB-14082 |
+| Single-cell RNA-seq, minor ampullate gland | ArrayExpress | E-MTAB-17861 |
+| Mass spectrometry proteomics, major ampullate gland | PRIDE (ProteomeXchange) | PXD052116 |
+| Mass spectrometry proteomics, minor ampullate gland | PRIDE (ProteomeXchange) | PXD086335 |
+
+### Processed data
+
+| Data | Location |
+|---|---|
+| Processed single-cell, spatial and cell2Location data| Figshare, DOI [10.6084/m9.figshare.35023624](https://doi.org/10.6084/m9.figshare.35023624). |
+| Processed bulkRNA and proteomics data| This repository |
+
+Any other relevant data are available from the corresponding authors upon reasonable request.
 
 ## Annotation
 

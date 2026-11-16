@@ -1,4 +1,4 @@
-p_val,avg_log2FC,pct.1,pct.2,p_val_adj,cluster,scGeneName,gene_id,geneName,Chr,Start,End,product,uniprot_id,lascID,geneName_GOI,Nephila_genome_Class,Group,sc_gene_id
+p_val,avg_log2FC,pct.1,pct.2,p_val_adj, cluster,scGeneName,gene_id,geneName,Chr,Start,End,product,uniprot_id,lascID,geneName_GOI,Nephila_genome_Class,Group,sc_gene_id
 0,10.312850812986923,0.952,0.223,0,ZoneA_MaSp2,MaSp2b,evm-000033F-processed-gene-24.21-GeneB,MaSp2b,000033F,5626769,5627335,"MaSp-f(1)#PRD27696.1, protein",PRD27696.1,LASC004267,MaSp2b,Major Ampullate Gland,Spidroin,evm-000033F-processed-gene-24.21-GeneB
 0,8.301331169583623,0.633,0.19,0,ZoneA_MaSp2,LASC004266,evm-000033F-processed-gene-23.0,LASC004266,000033F,5542581,5597370,"hypothetical, protein",NA,LASC004266,NA,NA,Other,evm-000033F-processed-gene-23.0
 0,5.996028495660607,0.948,0.288,0,ZoneA_MaSp2,MaSp2e,maker-000175F-exonerate_protein2genome-gene-8.3-GeneA,MaSp2e,000175F,1701320,1716556,"Major, ampullate, spidroin, 2, variant, 2, (Fragment)",A0A2S2B4G1,LASC012920,MaSp2e,Major Ampullate Gland,Spidroin,maker-000175F-exonerate-protein2genome-gene-8.3-GeneA
